@@ -196,7 +196,7 @@
     
     <reapack name="_libraries/json.lua" type="script" desc="_libraries/json">
       <version name="1.0" author="Alu">
-        <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/_libraries%2Fjson.lua</source>
+        <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/json.lua</source>
       </version>
     </reapack>
     
