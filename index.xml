@@ -1,278 +1,204 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1.0" name="Alu">
-
-  <!-- ________Scripts________ -->
-  
+<index version="1" name="Alu">
   <category name="Scripts">
-    <reapack name="Alu_Add 4 envelope points within Razor Edit.lua" type="script" desc="Alu_Add 4 envelope points within Razor Edit.lua">
-      <version name="1.0" author="Alu" time="03-Jul-2026">
-      <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/Alu_Add%204%20envelope%20points%20within%20Razor%20Edit.lua</source>
+    
+    <reapack name="Alu_Add 4 envelope points within Razor Edit.lua" type="script" desc="Alu_Add 4 envelope points within Razor Edit">
+      <version name="1.0" author="Alu">
+        <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/Alu_Add%204%20envelope%20points%20within%20Razor%20Edit.lua</source>
       </version>
     </reapack>
-  </category>
-
-  <category name="Scripts">
-    <reapack name="Alu_Add 4-frame crossfades between selected items (dialogue editing).lua"type="script" desc="Alu_Add 4-frame crossfades between selected items (dialogue editing).lua">
-      <version name="1.0" author="Alu" time="03-Jul-2026">
-      <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/Alu_Add%204-frame%20crossfades%20between%20selected%20items%20(dialogue%20editing).lua</source>
+    
+    <reapack name="Alu_Add 4-frame crossfades between selected items (dialogue editing).lua" type="script" desc="Alu_Add 4-frame crossfades between selected items (dialogue editing)">
+      <version name="1.0" author="Alu">
+        <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/Alu_Add%204-frame%20crossfades%20between%20selected%20items%20%28dialogue%20editing%29.lua</source>
       </version>
     </reapack>
-  </category>
-
-    <category name="Scripts">
-    <reapack name="Alu_Audio device switcher.lua" type="script" desc="Alu_Audio device switcher.lua">
-      <version name="1.0" author="Alu" time="03-Jul-2026">
-      <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/Alu_Audio%20device%20switcher.lua</source>
+    
+    <reapack name="Alu_Audio device switcher.lua" type="script" desc="Alu_Audio device switcher">
+      <version name="1.0" author="Alu">
+        <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/Alu_Audio%20device%20switcher.lua</source>
       </version>
     </reapack>
-  </category>
-
-   <category name="Scripts">
-    <reapack name="Alu_Color regions based on track colors by name.lua" type="script" desc="Alu_Color regions based on track colors by name.lua">
-      <version name="1.0" author="Alu" time="03-Jul-2026">
-      <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/Alu_Color%20regions%20based%20on%20track%20colors%20by%20name.lua</source>
+    
+    <reapack name="Alu_Color regions based on track colors by name.lua" type="script" desc="Alu_Color regions based on track colors by name">
+      <version name="1.0" author="Alu">
+        <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/Alu_Color%20regions%20based%20on%20track%20colors%20by%20name.lua</source>
       </version>
     </reapack>
-  </category>
-
-      <category name="Scripts">
-    <reapack name="Alu_Copy item envelope points.lua" type="script" desc="Alu_Copy item envelope points.lua">
-      <version name="1.0" author="Alu" time="03-Jul-2026">
-      <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/Alu_Copy%20item%20envelope%20points.lua</source>
+    
+    <reapack name="Alu_Copy item envelope points.lua" type="script" desc="Alu_Copy item envelope points">
+      <version name="1.0" author="Alu">
+        <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/Alu_Copy%20item%20envelope%20points.lua</source>
       </version>
     </reapack>
-  </category>
-
-      <category name="Scripts">
-    <reapack name="Alu_Alu_Create a folder from selected tracks.lua" type="script" desc="Alu_Create a folder from selected tracks.lua">
-      <version name="1.0" author="Alu" time="03-Jul-2026">
-      <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/Alu_Create%20a%20folder%20from%20selected%20tracks.lua</source>
+    
+    <reapack name="Alu_Create a folder from selected tracks.lua" type="script" desc="Alu_Create a folder from selected tracks">
+      <version name="1.0" author="Alu">
+        <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/Alu_Create%20a%20folder%20from%20selected%20tracks.lua</source>
       </version>
     </reapack>
-  </category>
-
-      <category name="Scripts">
-    <reapack name="Alu_Create receive track from selected track.lua" type="script" desc="Alu_Create receive track from selected track.lua">
-      <version name="1.0" author="Alu" time="03-Jul-2026">
-      <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/Alu_Create%20receive%20track%20from%20selected%20track.lua</source>
+    
+    <reapack name="Alu_Create receive track from selected track.lua" type="script" desc="Alu_Create receive track from selected track">
+      <version name="1.0" author="Alu">
+        <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/Alu_Create%20receive%20track%20from%20selected%20track.lua</source>
       </version>
     </reapack>
-  </category>
-
-    <category name="Scripts">
-    <reapack name="Alu_Deselect first item in a selection.lua" type="script" desc="Alu_Deselect first item in a selection.lua">
-      <version name="1.0" author="Alu" time="03-Jul-2026">
-      <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/Alu_Deselect%20first%20item%20in%20a%20selection.lua</source>
+    
+    <reapack name="Alu_Deselect first item in a selection.lua" type="script" desc="Alu_Deselect first item in a selection">
+      <version name="1.0" author="Alu">
+        <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/Alu_Deselect%20first%20item%20in%20a%20selection.lua</source>
       </version>
     </reapack>
-  </category>
-
-      <category name="Scripts">
-    <reapack name="Alu_Duplicate tracks or items depending on focus.lua" type="script" desc="Alu_Duplicate tracks or items depending on focus.lua">
-      <version name="1.0" author="Alu" time="03-Jul-2026">
-      <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/Alu_Duplicate%20tracks%20or%20items%20depending%20on%20focus.lua</source>
+    
+    <reapack name="Alu_Duplicate tracks or items depending on focus.lua" type="script" desc="Alu_Duplicate tracks or items depending on focus">
+      <version name="1.0" author="Alu">
+        <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/Alu_Duplicate%20tracks%20or%20items%20depending%20on%20focus.lua</source>
       </version>
     </reapack>
-  </category>
-  
-   <category name="Scripts">
-    <reapack name="Alu_Extend or shorten item to mouse cursor.lua" type="script" desc="Alu_Extend or shorten item to mouse cursor.lua">
-      <version name="1.0" author="Alu" time="03-Jul-2026">
-      <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/Alu_Extend%20or%20shorten%20item%20to%20mouse%20cursor.lua</source>
+    
+    <reapack name="Alu_Extend or shorten item to mouse cursor.lua" type="script" desc="Alu_Extend or shorten item to mouse cursor">
+      <version name="1.0" author="Alu">
+        <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/Alu_Extend%20or%20shorten%20item%20to%20mouse%20cursor.lua</source>
       </version>
     </reapack>
-  </category>
-
-      <category name="Scripts">
-    <reapack name="Alu_Extend or shorten selected items to edit cursor.lua" type="script" desc="Alu_Extend or shorten selected items to edit cursor.lua">
-      <version name="1.0" author="Alu" time="03-Jul-2026">
-      <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/Alu_Extend%20or%20shorten%20selected%20items%20to%20edit%20cursor.lua</source>
+    
+    <reapack name="Alu_Extend or shorten selected items to edit cursor.lua" type="script" desc="Alu_Extend or shorten selected items to edit cursor">
+      <version name="1.0" author="Alu">
+        <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/Alu_Extend%20or%20shorten%20selected%20items%20to%20edit%20cursor.lua</source>
       </version>
     </reapack>
-  </category>
-
-      <category name="Scripts">
-    <reapack name="Alu_Input Tempo (BPM).lua" type="script" desc="Alu_Input Tempo (BPM).lua">
-      <version name="1.0" author="Alu" time="03-Jul-2026">
-      <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/Alu_Input%20Tempo%20(BPM).lua</source>
+    
+    <reapack name="Alu_Input Tempo (BPM).lua" type="script" desc="Alu_Input Tempo (BPM)">
+      <version name="1.0" author="Alu">
+        <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/Alu_Input%20Tempo%20%28BPM%29.lua</source>
       </version>
     </reapack>
-  </category>
-
-   <category name="Scripts">
-    <reapack name="Alu_Insert empty item of certain length.lua" type="script" desc="Alu_Insert empty item of certain length.lua">
-      <version name="1.0" author="Alu" time="03-Jul-2026">
-      <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/Alu_Insert%20empty%20item%20of%20certain%20length.lua</source>
+    
+    <reapack name="Alu_Insert empty item of certain length.lua" type="script" desc="Alu_Insert empty item of certain length">
+      <version name="1.0" author="Alu">
+        <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/Alu_Insert%20empty%20item%20of%20certain%20length.lua</source>
       </version>
     </reapack>
-  </category>
-
-   <category name="Scripts">
-    <reapack name="Alu_Item counter.lua" type="script" desc="Alu_Item counter.lua">
-      <version name="1.0" author="Alu" time="03-Jul-2026">
-      <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/Alu_Item%20counter.lua</source>
+    
+    <reapack name="Alu_Item counter.lua" type="script" desc="Alu_Item counter">
+      <version name="1.0" author="Alu">
+        <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/Alu_Item%20counter.lua</source>
       </version>
     </reapack>
-  </category>
-
-     <category name="Scripts">
-    <reapack name="Alu_Lower item under mouse by -3 dB.lua" type="script" desc="Alu_Lower item under mouse by -3 dB.lua">
-      <version name="1.0" author="Alu" time="03-Jul-2026">
-      <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/Alu_Lower%20item%20under%20mouse%20by%20-3%20dB.lua</source>
+    
+    <reapack name="Alu_Lower item under mouse by -3 dB.lua" type="script" desc="Alu_Lower item under mouse by -3 dB">
+      <version name="1.0" author="Alu">
+        <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/Alu_Lower%20item%20under%20mouse%20by%20-3%20dB.lua</source>
       </version>
     </reapack>
-  </category>
-
-     <category name="Scripts">
-    <reapack name="Alu_Lower item under mouse by -6 dB.lua" type="script" desc="Alu_Lower item under mouse by -6 dB.lua">
-      <version name="1.0" author="Alu" time="03-Jul-2026">
-      <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/Alu_Lower%20item%20under%20mouse%20by%20-6%20dB.lua</source>
+    
+    <reapack name="Alu_Lower item under mouse by -6 dB.lua" type="script" desc="Alu_Lower item under mouse by -6 dB">
+      <version name="1.0" author="Alu">
+        <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/Alu_Lower%20item%20under%20mouse%20by%20-6%20dB.lua</source>
       </version>
     </reapack>
-  </category>
-
-     <category name="Scripts">
-    <reapack name="Alu_MIDI Note Length Adjuster with Ripple.lua" type="script" desc="Alu_MIDI Note Length Adjuster with Ripple.lua">
-      <version name="1.0" author="Alu" time="03-Jul-2026">
-      <source main="midi_editor">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/Alu_MIDI%20Note%20Length%20Adjuster%20with%20Ripple.lua</source>
+    
+    <reapack name="Alu_MIDI Note Length Adjuster with Ripple.lua" type="script" desc="Alu_MIDI Note Length Adjuster with Ripple">
+      <version name="1.0" author="Alu">
+        <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/Alu_MIDI%20Note%20Length%20Adjuster%20with%20Ripple.lua</source>
       </version>
     </reapack>
-  </category>
-
-   <category name="Scripts">
-    <reapack name="Alu_Metronome Volume Slider.lua" type="script" desc=Alu_Metronome Volume Slider.lua">
-      <version name="1.0" author="Alu" time="03-Jul-2026">
-      <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/Alu_Metronome%20Volume%20Slider.lua</source>
+    
+    <reapack name="Alu_Metronome Volume Slider.lua" type="script" desc="Alu_Metronome Volume Slider">
+      <version name="1.0" author="Alu">
+        <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/Alu_Metronome%20Volume%20Slider.lua</source>
       </version>
     </reapack>
-  </category>
-  
-   <category name="Scripts">
-    <reapack name="Alu_Move edit cursor to first item in project or to project start.lua" type="script" desc="Alu_Move edit cursor to first item in project or to project start.lua">
-      <version name="1.0" author="Alu" time="03-Jul-2026">
-      <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/Alu_Move%20edit%20cursor%20to%20first%20item%20in%20project%20or%20to%20project%20start.lua</source>
+    
+    <reapack name="Alu_Move edit cursor to first item in project or to project start.lua" type="script" desc="Alu_Move edit cursor to first item in project or to project start">
+      <version name="1.0" author="Alu">
+        <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/Alu_Move%20edit%20cursor%20to%20first%20item%20in%20project%20or%20to%20project%20start.lua</source>
       </version>
     </reapack>
-  </category>
-
-     <category name="Scripts">
-    <reapack name="Alu_Move edit cursor to first note in MIDI item or to item start.lua" type="script" desc="Alu_Move edit cursor to first note in MIDI item or to item start.lua">
-      <version name="1.0" author="Alu" time="03-Jul-2026">
-      <source main="midi_editor">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/Alu_Move%20edit%20cursor%20to%20first%20note%20in%20MIDI%20item%20or%20to%20item%20start.lua</source>
+    
+    <reapack name="Alu_Move edit cursor to first note in MIDI item or to item start.lua" type="script" desc="Alu_Move edit cursor to first note in MIDI item or to item start">
+      <version name="1.0" author="Alu">
+        <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/Alu_Move%20edit%20cursor%20to%20first%20note%20in%20MIDI%20item%20or%20to%20item%20start.lua</source>
       </version>
     </reapack>
-  </category>
-
-     <category name="Scripts">
-    <reapack name="Alu_Move items to edit cursor.lua" type="script" desc="Alu_Move items to edit cursor.lua">
-      <version name="1.0" author="Alu" time="03-Jul-2026">
-      <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/Alu_Move%20items%20to%20edit%20cursor.lua</source>
+    
+    <reapack name="Alu_Move items to edit cursor.lua" type="script" desc="Alu_Move items to edit cursor">
+      <version name="1.0" author="Alu">
+        <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/Alu_Move%20items%20to%20edit%20cursor.lua</source>
       </version>
     </reapack>
-  </category>
-
-     <category name="Scripts">
-    <reapack name="Alu_Move selected midi notes to C1.lua" type="script" desc="Alu_Move selected midi notes to C1.lua">
-      <version name="1.0" author="Alu" time="03-Jul-2026">
-      <source main="midi_editor">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/Alu_Move%20selected%20midi%20notes%20to%20C1.lua</source>
+    
+    <reapack name="Alu_Move selected midi notes to C1.lua" type="script" desc="Alu_Move selected midi notes to C1">
+      <version name="1.0" author="Alu">
+        <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/Alu_Move%20selected%20midi%20notes%20to%20C1.lua</source>
       </version>
     </reapack>
-  </category>
-
-     <category name="Scripts">
-    <reapack name="Alu_Move selected midi notes to specific pitch.lua" type="script" desc="Alu_Move selected midi notes to specific pitch.lua">
-      <version name="1.0" author="Alu" time="03-Jul-2026">
-      <source main="midi_editor">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/Alu_Move%20selected%20midi%20notes%20to%20specific%20pitch.lua</source>
+    
+    <reapack name="Alu_Move selected midi notes to specific pitch.lua" type="script" desc="Alu_Move selected midi notes to specific pitch">
+      <version name="1.0" author="Alu">
+        <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/Alu_Move%20selected%20midi%20notes%20to%20specific%20pitch.lua</source>
       </version>
     </reapack>
-  </category>
-
-     <category name="Scripts">
-    <reapack name="Alu_Paste item envelope points.lua" type="script" desc="Alu_Paste item envelope points.lua">
-      <version name="1.0" author="Alu" time="03-Jul-2026">
-      <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/Alu_Paste%20item%20envelope%20points.lua</source>
+    
+    <reapack name="Alu_Paste item envelope points.lua" type="script" desc="Alu_Paste item envelope points">
+      <version name="1.0" author="Alu">
+        <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/Alu_Paste%20item%20envelope%20points.lua</source>
       </version>
     </reapack>
-  </category>
-
-     <category name="Scripts">
-    <reapack name="Alu_Project Timer.lua" type="script" desc="Alu_Project Timer.lua">
-      <version name="1.0" author="Alu" time="03-Jul-2026">
-      <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/Alu_Project%20Timer.lua</source>
+    
+    <reapack name="Alu_Project Timer.lua" type="script" desc="Alu_Project Timer">
+      <version name="1.0" author="Alu">
+        <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/Alu_Project%20Timer.lua</source>
       </version>
     </reapack>
-  </category>
-
-     <category name="Scripts">
-    <reapack name="Alu_Quick Send.lua" type="script" desc="Alu_Quick Send.lua">
-      <version name="1.0" author="Alu" time="03-Jul-2026">
-      <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/Alu_Quick%20Send.lua</source>
+    
+    <reapack name="Alu_Quick Send.lua" type="script" desc="Alu_Quick Send">
+      <version name="1.0" author="Alu">
+        <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/Alu_Quick%20Send.lua</source>
       </version>
     </reapack>
-  </category>
-  
-<!-- ________REGION WF________ -->
-   
-<!-- ________REGION WF________ -->
-  
-    <category name="Scripts">
-    <reapack name="Alu_Render track or item under mouse cursor obeying time selection.lua" type="script" desc="Alu_Render track or item under mouse cursor obeying time selection.lua">
-      <version name="1.0" author="Alu" time="03-Jul-2026">
-      <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/Alu_Render%20track%20or%20item%20under%20mouse%20cursor%20obeying%20time%20selection.lua</source>
+    
+    <reapack name="Alu_Render track or item under mouse cursor obeying time selection.lua" type="script" desc="Alu_Render track or item under mouse cursor obeying time selection">
+      <version name="1.0" author="Alu">
+        <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/Alu_Render%20track%20or%20item%20under%20mouse%20cursor%20obeying%20time%20selection.lua</source>
       </version>
     </reapack>
-  </category>
-
-   <category name="Scripts">
-    <reapack name="Alu_Select envelope points in razor edit area.lua" type="script" desc="Alu_Select envelope points in razor edit area.lua">
-      <version name="1.0" author="Alu" time="03-Jul-2026">
-      <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/Alu_Select%20envelope%20points%20in%20razor%20edit%20area.lua</source>
+    
+    <reapack name="Alu_Select envelope points in razor edit area.lua" type="script" desc="Alu_Select envelope points in razor edit area">
+      <version name="1.0" author="Alu">
+        <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/Alu_Select%20envelope%20points%20in%20razor%20edit%20area.lua</source>
       </version>
     </reapack>
-  </category>
-
-     <category name="Scripts">
-    <reapack name="Alu_Set Tempo and Time Division.lua" type="script" desc="Alu_Set Tempo and Time Division.lua">
-      <version name="1.0" author="Alu" time="03-Jul-2026">
-      <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/Alu_Set%20Tempo%20and%20Time%20Division.lua</source>
+    
+    <reapack name="Alu_Set Tempo and Time Division.lua" type="script" desc="Alu_Set Tempo and Time Division">
+      <version name="1.0" author="Alu">
+        <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/Alu_Set%20Tempo%20and%20Time%20Division.lua</source>
       </version>
     </reapack>
-  </category>
-
-     <category name="Scripts">
-    <reapack name="Alu_Smart Mute.lua" type="script" desc="Alu_Smart Mute.lua">
-      <version name="1.0" author="Alu" time="03-Jul-2026">
-      <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/Alu_Smart%20Mute.lua</source>
+    
+    <reapack name="Alu_Smart Mute.lua" type="script" desc="Alu_Smart Mute">
+      <version name="1.0" author="Alu">
+        <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/Alu_Smart%20Mute.lua</source>
       </version>
     </reapack>
-  </category>
-
-     <category name="Scripts">
-    <reapack name="Alu_Smart Record.eel" type="script" desc="Alu_Smart Record.eel">
-      <version name="1.0" author="Alu" time="03-Jul-2026">
-      <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/Alu_Smart%20Record.eel</source>
+    
+    <reapack name="Alu_Smart Record.eel" type="script" desc="Alu_Smart Record">
+      <version name="1.0" author="Alu">
+        <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/Alu_Smart%20Record.eel</source>
       </version>
     </reapack>
-  </category>
-
-<!-- ________U REGION WF________ -->
-   
-<!-- ________U REGION WF________ -->
-
-     <category name="Scripts">
-    <reapack name="_font.lua" type="script" desc="_font.lua">
-      <version name="1.0" author="Alu" time="03-Jul-2026">
-      <source main="data">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/_font.lua</source>
+    
+    <reapack name="_font.lua" type="script" desc="_font">
+      <version name="1.0" author="Alu">
+        <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/_font.lua</source>
       </version>
     </reapack>
-  </category>
-
-     <category name="Scripts">
-    <reapack name="json.lua" type="script" desc="json.lua">
-      <version name="1.0" author="Alu" time="03-Jul-2026">
-      <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/_libraries/json.lua</source>
+    
+    <reapack name="_libraries/json.lua" type="script" desc="_libraries/json">
+      <version name="1.0" author="Alu">
+        <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/_libraries%2Fjson.lua</source>
       </version>
     </reapack>
+    
   </category>
-
 </index>
