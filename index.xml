@@ -1,0 +1,11 @@
+<?xmI version=*1.0" encoding-"utf-8"?> 
+<index version-"1.0" name-"Alu"›
+
+  <category name-"Scripts"›
+    <reapack name-"Alu_Add 4 envelope points within Razor Edit.lua" type-"script" desc-"Alu_Add 4 envelope points within Razor Edit.lua"› 
+      <version name-"1.0" author-"Alu" time-"03-Jul-2026"›
+      <source main="main"›https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/Alu_Add%204%20envelope%20points%20within%20Razor%20Edit.lua‹/source>
+      </version>
+    </reapack>
+  </category>
+</index›
