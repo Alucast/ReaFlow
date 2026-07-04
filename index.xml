@@ -156,10 +156,5 @@
         <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/Alu_Smart%20Record.eel</source>
       </version>
     </reapack>
-    <reapack name="_font.lua" type="script" desc="_font">
-      <version name="1.0" author="Alu">
-        <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/_font.lua</source>
-      </version>
-    </reapack>
   </category>
 </index>
