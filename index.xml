@@ -69,7 +69,7 @@
     </reapack>
     
     <reapack name="Alu_Insert empty item of certain length.lua" type="script" desc="Alu_Insert empty item of certain length">
-      <version name="1.0" author="Alu">
+      <version name="1.1" author="Alu">
         <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/Alu_Insert%20empty%20item%20of%20certain%20length.lua</source>
       </version>
     </reapack>
