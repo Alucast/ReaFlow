@@ -13,6 +13,12 @@
         <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/Alu_Add%204-frame%20crossfades%20between%20selected%20items%20%28dialogue%20editing%29.lua</source>
       </version>
     </reapack>
+
+     <reapack name="Alu_Add Active Fixed Lane.lua" type="script" desc="Alu_Add Active Fixed Lane">
+      <version name="1.0" author="Alu">
+        <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/Alu_Add%20Active%20Fixed%20Lane.lua</source>
+      </version>
+    </reapack>
     
     <reapack name="Alu_Audio device switcher.lua" type="script" desc="Alu_Audio device switcher">
       <version name="1.0" author="Alu">
