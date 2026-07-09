@@ -153,7 +153,7 @@
     </reapack>
     
     <reapack name="Alu_Quick Send.lua" type="script" desc="Alu_Quick Send">
-      <version name="1.0" author="Alu">
+      <version name="3.4" author="Alu">
         <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/Alu_Quick%20Send.lua</source>
       </version>
     </reapack>
