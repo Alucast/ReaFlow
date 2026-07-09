@@ -1,5 +1,5 @@
 -- @description Quick Send
--- @version 3.3
+-- @version 3.4
 -- @author Alejandro (Alu) 
 
 local ctx = reaper.ImGui_CreateContext('Quick Send Menu')
@@ -11,6 +11,8 @@ local cached_source_guids = {}
 local cached_current_guid = nil
 local preview_results = {}
 local should_open_preview = false
+local delete_popup_guid = nil
+local delete_popup_sources = {}
 
 -- Select the track under the mouse cursor
 local function select_track_under_mouse()
@@ -211,6 +213,45 @@ local function track_send_exists(src_tr, dest_tr)
     return false
 end
 
+local function get_sending_tracks(dest_tr)
+    -- Returns a table of all tracks that have a send to dest_tr
+    if not dest_tr then return {} end
+    local dest_guid = reaper.GetTrackGUID(dest_tr)
+    local sources = {}
+    for i = 0, reaper.CountTracks(0) - 1 do
+        local tr = reaper.GetTrack(0, i)
+        if tr then
+            local num_sends = reaper.GetTrackNumSends(tr, 0)
+            for s = 0, num_sends - 1 do
+                local current_dest = reaper.GetTrackSendInfo_Value(tr, 0, s, "P_DESTTRACK")
+                if current_dest and reaper.ValidatePtr2(0, current_dest, "MediaTrack*") and reaper.GetTrackGUID(current_dest) == dest_guid then
+                    sources[#sources + 1] = tr
+                    break -- only need one send per source track
+                end
+            end
+        end
+    end
+    return sources
+end
+
+local function delete_send_from_to(src_tr, dest_tr)
+    -- Delete a specific send from src_tr to dest_tr
+    if not src_tr or not dest_tr then return end
+    local dest_guid = reaper.GetTrackGUID(dest_tr)
+    
+    reaper.Undo_BeginBlock()
+    local num_sends = reaper.GetTrackNumSends(src_tr, 0)
+    for s = num_sends - 1, 0, -1 do
+        local current_dest = reaper.GetTrackSendInfo_Value(src_tr, 0, s, "P_DESTTRACK")
+        if current_dest and reaper.ValidatePtr2(0, current_dest, "MediaTrack*") and reaper.GetTrackGUID(current_dest) == dest_guid then
+            reaper.RemoveTrackSend(src_tr, 0, s)
+        end
+    end
+    reaper.TrackList_AdjustWindows(false)
+    reaper.UpdateArrange()
+    reaper.Undo_EndBlock("Quick Send: Delete", -1)
+end
+
 local function create_send_to(dest_tr)
     if not dest_tr then return end
     local src_tracks = get_cached_source_tracks()
@@ -233,23 +274,41 @@ end
 
 local function delete_send_to(dest_tr)
     if not dest_tr then return end
-    local src_tracks = get_cached_source_tracks()
-    if #src_tracks == 0 then return end
     local dest_guid = reaper.GetTrackGUID(dest_tr)
-
-    reaper.Undo_BeginBlock()
+    
+    -- Check selected tracks for sends to this destination
+    local src_tracks = get_cached_source_tracks()
+    local valid_sources = {}
+    
     for _, src_tr in ipairs(src_tracks) do
-        local num_sends = reaper.GetTrackNumSends(src_tr, 0)
-        for s = num_sends - 1, 0, -1 do
-            local current_dest = reaper.GetTrackSendInfo_Value(src_tr, 0, s, "P_DESTTRACK")
-            if current_dest and reaper.ValidatePtr2(0, current_dest, "MediaTrack*") and reaper.GetTrackGUID(current_dest) == dest_guid then
-                reaper.RemoveTrackSend(src_tr, 0, s)
-            end
+        if track_send_exists(src_tr, dest_tr) then
+            valid_sources[#valid_sources + 1] = src_tr
         end
     end
-    reaper.TrackList_AdjustWindows(false)
-    reaper.UpdateArrange()
-    reaper.Undo_EndBlock("Quick Send: Delete", -1)
+    
+    if #valid_sources == 1 then
+        -- Exactly one selected track has a send here - delete it directly
+        delete_send_from_to(valid_sources[1], dest_tr)
+    elseif #valid_sources > 1 then
+        -- Multiple selected tracks have sends here - show popup
+        delete_popup_guid = dest_guid
+        delete_popup_sources = valid_sources
+    else
+        -- No selected tracks have a send here - find all tracks that send to this destination
+        local sending_tracks = get_sending_tracks(dest_tr)
+        
+        if #sending_tracks == 0 then
+            -- No sends to delete
+            return
+        elseif #sending_tracks == 1 then
+            -- Only one track sends here - delete it directly
+            delete_send_from_to(sending_tracks[1], dest_tr)
+        else
+            -- Multiple tracks send here - open popup to choose
+            delete_popup_guid = dest_guid
+            delete_popup_sources = sending_tracks
+        end
+    end
 end
 
 local function go_to_track(tr)
@@ -419,7 +478,7 @@ local function draw_favorites()
                 reaper.ImGui_Text(ctx, "Favorites")
             end
             has_any = true
-            draw_track_row(tr, 190, false)
+            draw_track_row(tr, 120, false)
         end
     end
     return has_any
@@ -442,8 +501,57 @@ local function draw_recent()
             end
         end
     end
-    if not found_any then
-        reaper.ImGui_Text(ctx, "All recent destinations are already pinned as favorites.")
+end
+
+local function draw_delete_popup()
+    if not delete_popup_guid then return end
+    
+    local dest_tr = get_track_by_guid(delete_popup_guid)
+    if not dest_tr then
+        delete_popup_guid = nil
+        delete_popup_sources = {}
+        return
+    end
+    
+    local popup_name = "Delete Send##delete_popup"
+    reaper.ImGui_OpenPopup(ctx, popup_name)
+    
+    -- Center popup on top of the main Quick Send window
+    local main_x, main_y = reaper.ImGui_GetWindowPos(ctx)
+    local main_w, main_h = reaper.ImGui_GetWindowSize(ctx)
+    local center_x = main_x + main_w * 0.5
+    local center_y = main_y + main_h * 0.5
+    reaper.ImGui_SetNextWindowPos(ctx, center_x, center_y, reaper.ImGui_Cond_Appearing(), 0.5, 0.5)
+    
+    if reaper.ImGui_BeginPopupModal(ctx, popup_name, nil, reaper.ImGui_WindowFlags_AlwaysAutoResize()) then
+        reaper.ImGui_Text(ctx, "Multiple tracks send to " .. get_track_name(dest_tr))
+        reaper.ImGui_Text(ctx, "Select which source to remove:")
+        reaper.ImGui_Separator(ctx)
+        
+        for _, src_tr in ipairs(delete_popup_sources) do
+            draw_color_square(get_track_color_u32(src_tr), 14)
+            reaper.ImGui_SameLine(ctx)
+            if reaper.ImGui_Button(ctx, get_track_name(src_tr), 160, 0) then
+                delete_send_from_to(src_tr, dest_tr)
+                reaper.ImGui_CloseCurrentPopup(ctx)
+                delete_popup_guid = nil
+                delete_popup_sources = {}
+            end
+        end
+        
+        reaper.ImGui_Separator(ctx)
+        
+        -- Center the cancel button
+        local avail_width = reaper.ImGui_GetContentRegionAvail(ctx)
+        local cancel_width = 80
+        reaper.ImGui_SetCursorPosX(ctx, (avail_width - cancel_width) * 0.5)
+        if reaper.ImGui_Button(ctx, "Cancel", cancel_width, 0) then
+            reaper.ImGui_CloseCurrentPopup(ctx)
+            delete_popup_guid = nil
+            delete_popup_sources = {}
+        end
+        
+        reaper.ImGui_EndPopup(ctx)
     end
 end
 
@@ -451,7 +559,10 @@ local function loop()
     cache_selected_tracks()
     
     if reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Escape()) then 
-        if should_open_preview then
+        if delete_popup_guid then
+            delete_popup_guid = nil
+            delete_popup_sources = {}
+        elseif should_open_preview then
             should_open_preview = false
         else
             return 
@@ -474,6 +585,10 @@ local function loop()
             reaper.ImGui_Separator(ctx)
         end
         draw_recent()
+        
+        -- Draw delete popup if active
+        draw_delete_popup()
+        
         reaper.ImGui_End(ctx)
     end
     if open then reaper.defer(loop) end
