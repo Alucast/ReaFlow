@@ -67,6 +67,12 @@
         <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/Alu_Extend%20or%20shorten%20selected%20items%20to%20edit%20cursor.lua</source>
       </version>
     </reapack>
+
+     <reapack name="Alu_Frame.io Timeline Comment Viewer.lua" type="script" desc="Frame.io Timeline Comment Viewer">
+      <version name="2.2.1" author="Alu">
+        <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/Alu_Frame.io%20Timeline%20Comment%20Viewer.lua</source>
+      </version>
+    </reapack>
     
     <reapack name="Alu_Input Tempo (BPM).lua" type="script" desc="Alu_Input Tempo (BPM)">
       <version name="1.0" author="Alu">
