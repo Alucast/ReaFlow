@@ -1,7 +1,7 @@
 --[[
 @description Frame.io Timeline Comment Viewer
-@version 2.8.0
-@author Alu
+@version 2.8.1
+@author Assistant
 @about
   Reads Frame.io exported .txt comment files and displays a visual timeline
   with markers synced to a locked video item in REAPER's arrange view.
@@ -834,6 +834,7 @@ local CFG = {
   timeline_h        = 54,
   hover_dist        = 6,
   playhead_drag_dist = 8,
+  playhead_head_h   = 10,
   px_per_label      = 80,
 }
 
@@ -1476,8 +1477,10 @@ local function draw_timeline(info)
   end
 
   -- Interaction
-  imgui.SetCursorScreenPos(ctx, cx, cy)
-  imgui.InvisibleButton(ctx, "##tl", w, h)
+  -- Extend the interaction area above the timeline so the playhead triangle
+  -- is draggable as well as its vertical stem.
+  imgui.SetCursorScreenPos(ctx, cx, cy - CFG.playhead_head_h)
+  imgui.InvisibleButton(ctx, "##tl", w, h + CFG.playhead_head_h)
 
   local is_hovered = imgui.IsItemHovered(ctx)
   local is_active = imgui.IsItemActive(ctx)
@@ -1514,10 +1517,13 @@ local function draw_timeline(info)
       local click_ratio = math.max(0, math.min(1, (mx - cx) / w))
       local seek_time = view_start + click_ratio * visible_len
       reaper.SetEditCurPos(info.pos + seek_time, true, true)
-    else
+    elseif my >= cy then
       STATE.pending_click = true
       STATE.drag_start_mx = mx
       STATE.drag_start_view = view_start
+      STATE.drag_mode = nil
+    else
+      STATE.pending_click = false
       STATE.drag_mode = nil
     end
   end
