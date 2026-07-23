@@ -69,7 +69,7 @@
     </reapack>
 
      <reapack name="Alu_Frame.io Timeline Comment Viewer.lua" type="script" desc="Alu_Frame.io Timeline Comment Viewer">
-      <version name="2.2.1" author="Alu">
+      <version name="2.8.0" author="Alu">
         <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/Alu_Frame.io%20Timeline%20Comment%20Viewer.lua</source>
       </version>
     </reapack>
