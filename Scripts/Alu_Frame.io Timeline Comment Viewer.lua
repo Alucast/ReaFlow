@@ -1,7 +1,7 @@
 --[[
 @description Frame.io Timeline Comment Viewer
-@version 2.2.1
-@author Assistant
+@version 2.8.0
+@author Alu
 @about
   Reads Frame.io exported .txt comment files and displays a visual timeline
   with markers synced to a locked video item in REAPER's arrange view.
@@ -65,16 +65,16 @@ imgui.SetConfigVar(
 -- =====================================================================
 -- All colors are stored internally as ImGui U32 colors in AARRGGBB format.
 local COLOR_PRESETS = {
-  {key="bg",         label="Timeline BG",     default=0xFF30FFAB},
-  {key="border",     label="Border",          default=0xFF6BBDBD},
-  {key="text",       label="Text",            default=0xFFFF8E8E},
-  {key="tick",       label="Tick Marks",      default=0xFFCCFFFF},
-  {key="marker",     label="Markers",         default=0xFFFFFFC9},
+  {key="bg",         label="Timeline BG",     default=0x3381FF36},
+  {key="border",     label="Border",          default=0x40D2D240},
+  {key="text",       label="Text",            default=0xFFC3FFFF},
+  {key="tick",       label="Tick Marks",      default=0xFFFFFFFF},
+  {key="marker",     label="Markers",         default=0xFFFFE1FF},
   {key="marker_hov", label="Marker Hover",    default=0xFFFFBAFF},
-  {key="playhead",   label="Playhead",        default=0xFF4485FF},
-  {key="active",     label="Active Text",     default=0xFFFFFFE8},
-  {key="warn",       label="Warnings",        default=0xFFFF4444},
-  {key="completed",  label="Completed",       default=0xFFFF0000},
+  {key="playhead",   label="Playhead",        default=0xFF87FFFF},
+  {key="active",     label="Active Text",     default=0xFFFFE0FF},
+  {key="warn",       label="Warnings",        default=0xFF3D3DFF},
+  {key="completed",  label="Completed",       default=0xFF9BFFFF},
 }
 
 local COLORS = {}
@@ -86,11 +86,15 @@ local picker_sel_key = nil
 local picker_h, picker_s, picker_v, picker_a = 0, 0, 1, 1
 local picker_hex_str = ""
 local picker_original_color = nil
+local editor_hex_values = {}
+local set_tooltip_wrapped
+local TOOLTIP_DELAY_SECONDS = 2.0
+local tooltip_hover_key = nil
+local tooltip_hover_started = 0
+local tooltip_seen_this_frame = false
 
 local PICKER_HUE_W = 24
-local SWATCH_SIZE = 42
-local SWATCH_GAP = 5
-local SWATCH_MIN_CELL_W = 66
+local EDITOR_SWATCH_SIZE = 20
 
 -- Color editor window position for picker anchoring
 local color_editor_rect = {x = 0, y = 0, w = 0, h = 0, applied = false}
@@ -163,7 +167,7 @@ local function U32ToHex(u32)
   return string.format("%06X", u32 & 0x00FFFFFF)
 end
 
-local function HexToU32(hex)
+local function HexToU32(hex, alpha_override)
   if type(hex) ~= "string" then return nil end
 
   hex = hex:gsub("#", ""):gsub("[^%x]", ""):upper()
@@ -175,7 +179,8 @@ local function HexToU32(hex)
   if not rgb then return nil end
 
   -- Six-digit input changes RGB while preserving the current alpha.
-  local alpha = picker_a or 1.0
+  local alpha = alpha_override
+  if alpha == nil then alpha = picker_a or 1.0 end
   return reaper.ImGui_ColorConvertDouble4ToU32(
     ((rgb >> 16) & 0xFF) / 255,
     ((rgb >> 8) & 0xFF) / 255,
@@ -194,6 +199,7 @@ local function updatePickerColor()
   local color = HSVtoU32(picker_h, picker_s, picker_v, picker_a)
   if color then
     COLORS[picker_sel_key] = color
+    editor_hex_values[picker_sel_key] = U32ToHex(color)
   end
 end
 
@@ -205,6 +211,13 @@ local function refreshPickerFromCurrentColor()
     COLORS[picker_sel_key] = color
     picker_h, picker_s, picker_v, picker_a = U32ToHSV(color)
     picker_hex_str = U32ToHex(color)
+    editor_hex_values[picker_sel_key] = picker_hex_str
+  end
+end
+
+local function syncEditorHexValues()
+  for _, c in ipairs(COLOR_PRESETS) do
+    editor_hex_values[c.key] = U32ToHex(COLORS[c.key] or c.default)
   end
 end
 
@@ -218,6 +231,7 @@ local function loadColors()
     local num = tonumber(val)
     COLORS[c.key] = normalizeColor(num) or normalizeColor(c.default)
   end
+  syncEditorHexValues()
 end
 
 local function saveColors()
@@ -232,6 +246,7 @@ local function resetColors()
   for _, c in ipairs(COLOR_PRESETS) do
     COLORS[c.key] = normalizeColor(c.default)
   end
+  syncEditorHexValues()
 
   -- If the picker is open, immediately reflect the reset color in it.
   refreshPickerFromCurrentColor()
@@ -269,6 +284,7 @@ local function loadColorPreset(idx)
   end
 
   -- Keep the currently open picker synchronized if a preset is loaded.
+  syncEditorHexValues()
   refreshPickerFromCurrentColor()
   saveColors()
   return true
@@ -304,6 +320,7 @@ end
 local function cancelColorPicker()
   if picker_sel_key and picker_original_color then
     COLORS[picker_sel_key] = picker_original_color
+    editor_hex_values[picker_sel_key] = U32ToHex(picker_original_color)
   end
 
   show_color_picker_popup = false
@@ -381,20 +398,34 @@ local function drawCheckerboard(dl, x, y, w, h, cell)
   end
 end
 
+local function commitEditorColor(key, color)
+  color = normalizeColor(color)
+  if not color then return end
+
+  COLORS[key] = color
+  editor_hex_values[key] = U32ToHex(color)
+  if picker_sel_key == key then
+    picker_original_color = color
+    refreshPickerFromCurrentColor()
+  end
+  saveColors()
+end
+
 -- =====================================================================
--- COLOR EDITOR WINDOW - GRID OF LABELED SWATCHES
+-- COLOR EDITOR WINDOW - COMPACT COLOR LIST
 -- =====================================================================
 local function draw_color_editor_window()
   if not show_color_editor then return end
 
   if not color_editor_rect.applied and color_editor_rect.w > 0 then
     imgui.SetNextWindowPos(ctx, color_editor_rect.x, color_editor_rect.y, imgui.Cond_Always)
-    imgui.SetNextWindowSize(ctx, color_editor_rect.w, color_editor_rect.h, imgui.Cond_Always)
     color_editor_rect.applied = true
-  else
-    imgui.SetNextWindowSize(ctx, 340, 520, imgui.Cond_FirstUseEver)
   end
-  local vis, open = imgui.Begin(ctx, "Color Editor", true)
+  imgui.SetNextWindowSize(ctx, 235, 421, imgui.Cond_Always)
+  local vis, open = imgui.Begin(
+    ctx, "Color Editor", true,
+    imgui.WindowFlags_NoResize + imgui.WindowFlags_MenuBar
+  )
 
   if vis then
     color_editor_rect.x, color_editor_rect.y = imgui.GetWindowPos(ctx)
@@ -409,98 +440,158 @@ local function draw_color_editor_window()
     if imgui.IsWindowFocused(ctx, imgui.FocusedFlags_RootAndChildWindows)
       and imgui.IsKeyPressed(ctx, imgui.Key_Escape) then
       show_color_editor = false
+      cancelColorPicker()
     end
 
-    local dl = imgui.GetWindowDrawList(ctx)
-    local avail_w = imgui.GetContentRegionAvail(ctx)
-
-    -- Use a responsive number of columns instead of forcing four columns into
-    -- whatever width the window happens to have. This prevents labels and
-    -- swatches from collapsing into each other when the window is resized.
-    local cols = math.floor((avail_w + SWATCH_GAP) /
-      (SWATCH_MIN_CELL_W + SWATCH_GAP))
-    cols = math.max(1, math.min(4, cols))
-
-    -- A real table gives every swatch a fixed column and every row a fixed
-    -- height. Unlike SameLine(), label length can no longer push later cells
-    -- sideways or make the next row start at an inconsistent position.
-    local table_flags = imgui.TableFlags_SizingFixedSame +
-      imgui.TableFlags_NoHostExtendX
-    imgui.PushStyleVar(ctx, imgui.StyleVar_CellPadding, SWATCH_GAP * 0.5, 0)
-    if imgui.BeginTable(ctx, "##color_swatch_grid", cols, table_flags) then
-      local label_h = imgui.GetFontSize(ctx) * 2 + 4
-      local row_h = SWATCH_SIZE + 3 + label_h + SWATCH_GAP
-
-      for col = 1, cols do
-        imgui.TableSetupColumn(
-          ctx, "##swatch_col_" .. col,
-          imgui.TableColumnFlags_WidthFixed, SWATCH_MIN_CELL_W
-        )
+    if imgui.BeginMenuBar(ctx) then
+      if imgui.BeginMenu(ctx, "Colors") then
+        if imgui.MenuItem(ctx, "Reset All to Defaults") then
+          resetColors()
+        end
+        imgui.EndMenu(ctx)
       end
+      imgui.EndMenuBar(ctx)
+    end
 
-      for idx, preset in ipairs(COLOR_PRESETS) do
-        local col_idx = (idx - 1) % cols
-        if col_idx == 0 then
-          imgui.TableNextRow(ctx, 0, row_h)
+    local preset_names = {}
+    local preset_has_data = {}
+    for i = 1, MAX_PRESETS do
+      local name = getPresetName(i)
+      preset_has_data[i] = name ~= nil
+      table.insert(
+        preset_names,
+        (name and (i .. ": " .. name)) or (i .. ": (empty)")
+      )
+    end
+
+    imgui.Text(ctx, "Presets")
+    local preset_changed, new_preset_idx = imgui.Combo(
+      ctx, "##preset", preset_sel_idx,
+      table.concat(preset_names, "\0") .. "\0"
+    )
+    if preset_changed then preset_sel_idx = new_preset_idx end
+    imgui.Dummy(ctx, 0, 4)
+
+    local dl = imgui.GetWindowDrawList(ctx)
+    local table_flags = imgui.TableFlags_SizingFixedFit +
+      imgui.TableFlags_RowBg + imgui.TableFlags_BordersInnerH
+    if imgui.BeginTable(ctx, "##color_list", 3, table_flags) then
+      imgui.TableSetupColumn(
+        ctx, "Color", imgui.TableColumnFlags_WidthFixed, EDITOR_SWATCH_SIZE + 8
+      )
+      imgui.TableSetupColumn(
+        ctx, "Hex", imgui.TableColumnFlags_WidthFixed, 94
+      )
+      imgui.TableSetupColumn(
+        ctx, "Element", imgui.TableColumnFlags_WidthStretch
+      )
+
+      for _, preset in ipairs(COLOR_PRESETS) do
+        local color = normalizeColor(COLORS[preset.key]) or normalizeColor(preset.default)
+        if not editor_hex_values[preset.key] then
+          editor_hex_values[preset.key] = U32ToHex(color)
         end
-        imgui.TableSetColumnIndex(ctx, col_idx)
 
-        local col = normalizeColor(COLORS[preset.key]) or normalizeColor(preset.default)
+        imgui.TableNextRow(ctx, 0, EDITOR_SWATCH_SIZE + 8)
+        imgui.TableSetColumnIndex(ctx, 0)
+        imgui.PushID(ctx, preset.key)
 
-        imgui.PushStyleColor(ctx, imgui.Col_Button, col)
-        imgui.PushStyleColor(ctx, imgui.Col_ButtonHovered, col)
-        imgui.PushStyleColor(ctx, imgui.Col_ButtonActive, col)
+        local swatch_x, swatch_y = imgui.GetCursorScreenPos(ctx)
+        drawCheckerboard(
+          dl, swatch_x, swatch_y,
+          EDITOR_SWATCH_SIZE, EDITOR_SWATCH_SIZE, 4
+        )
+        imgui.DrawList_AddRectFilled(
+          dl, swatch_x, swatch_y,
+          swatch_x + EDITOR_SWATCH_SIZE, swatch_y + EDITOR_SWATCH_SIZE,
+          color, 2
+        )
+        imgui.DrawList_AddRect(
+          dl, swatch_x, swatch_y,
+          swatch_x + EDITOR_SWATCH_SIZE, swatch_y + EDITOR_SWATCH_SIZE,
+          0xFFFFFFFF, 2
+        )
+        imgui.InvisibleButton(
+          ctx, "##swatch", EDITOR_SWATCH_SIZE, EDITOR_SWATCH_SIZE
+        )
 
-        if imgui.Button(ctx, "##sw_" .. preset.key, SWATCH_SIZE, SWATCH_SIZE) then
+        if imgui.IsItemClicked(ctx, 0) then
           openColorPicker(preset.key)
+        elseif imgui.IsItemClicked(ctx, 1) then
+          commitEditorColor(preset.key, preset.default)
+          color = COLORS[preset.key]
         end
-
-        imgui.PopStyleColor(ctx, 3)
-
-        if picker_sel_key == preset.key then
-          local minx, miny = imgui.GetItemRectMin(ctx)
-          local maxx, maxy = imgui.GetItemRectMax(ctx)
-          imgui.DrawList_AddRect(
-            dl, minx - 1, miny - 1, maxx + 1, maxy + 1,
-            0xFFFFFFFF, 0, nil, 2
+        if imgui.IsItemHovered(ctx) then
+          set_tooltip_wrapped(
+            "Left-click: edit color\nRight-click: restore default",
+            "color_swatch_" .. preset.key
           )
         end
 
-        -- Keep the name directly beneath its square. The fixed two-line label
-        -- area preserves row alignment even when a name wraps.
-        imgui.Dummy(ctx, 0, 3)
-        local cell_w = imgui.GetContentRegionAvail(ctx)
-        imgui.PushTextWrapPos(ctx, imgui.GetCursorPosX(ctx) + cell_w)
-        imgui.TextWrapped(ctx, preset.label)
-        imgui.PopTextWrapPos(ctx)
+        if picker_sel_key == preset.key then
+          imgui.DrawList_AddRect(
+            dl, swatch_x - 2, swatch_y - 2,
+            swatch_x + EDITOR_SWATCH_SIZE + 2,
+            swatch_y + EDITOR_SWATCH_SIZE + 2,
+            0xFFFFFFFF, 2, nil, 2
+          )
+        end
+
+        imgui.TableSetColumnIndex(ctx, 1)
+        imgui.AlignTextToFramePadding(ctx)
+        imgui.Text(ctx, "#")
+        imgui.SameLine(ctx, 0, 2)
+        local hex_field_w = 68
+        local hex_text_w = imgui.CalcTextSize(ctx, "FFFFFF")
+        local _, frame_padding_y = imgui.GetStyleVar(
+          ctx, imgui.StyleVar_FramePadding
+        )
+        local centered_padding_x = math.max(
+          2, (hex_field_w - hex_text_w) * 0.5
+        )
+        imgui.PushStyleVar(
+          ctx, imgui.StyleVar_FramePadding,
+          centered_padding_x, frame_padding_y
+        )
+        imgui.PushItemWidth(ctx, hex_field_w)
+        local hex_changed, new_hex = imgui.InputText(
+          ctx, "##hex", editor_hex_values[preset.key],
+          imgui.InputTextFlags_CharsHexadecimal +
+          imgui.InputTextFlags_CharsUppercase
+        )
+        imgui.PopItemWidth(ctx)
+        imgui.PopStyleVar(ctx)
+        if hex_changed then
+          local clean_hex = new_hex:gsub("[^%x]", ""):upper():sub(1, 6)
+          editor_hex_values[preset.key] = clean_hex
+          if #clean_hex == 6 then
+            local _, _, _, alpha = U32ToHSV(color)
+            local new_color = HexToU32(clean_hex, alpha)
+            if new_color then commitEditorColor(preset.key, new_color) end
+          end
+        end
+
+        imgui.TableSetColumnIndex(ctx, 2)
+        imgui.AlignTextToFramePadding(ctx)
+        imgui.Text(ctx, preset.label)
+        imgui.PopID(ctx)
       end
 
       imgui.EndTable(ctx)
     end
-    imgui.PopStyleVar(ctx)
 
-    imgui.Dummy(ctx, 0, 12)
+    imgui.Dummy(ctx, 0, 8)
 
-    if imgui.Button(ctx, "Reset All to Defaults") then
-      resetColors()
-    end
+    local color_button_w = 60
+    local button_spacing_x = imgui.GetStyleVar(ctx, imgui.StyleVar_ItemSpacing)
+    local color_buttons_total = color_button_w * 3 + button_spacing_x * 2
+    local color_buttons_avail = imgui.GetContentRegionAvail(ctx)
+    imgui.SetCursorPosX(
+      ctx, imgui.GetCursorPosX(ctx) +
+      math.max(0, (color_buttons_avail - color_buttons_total) * 0.5)
+    )
 
-    imgui.Separator(ctx)
-    imgui.Text(ctx, "Presets")
-
-    local preset_names = {}
-    local preset_has_data = {}
-
-    for i = 1, MAX_PRESETS do
-      local name = getPresetName(i)
-      preset_has_data[i] = name ~= nil
-      table.insert(preset_names, (name and (i .. ": " .. name)) or (i .. ": (empty)"))
-    end
-
-    local chg, new_idx = imgui.Combo(ctx, "##preset", preset_sel_idx, table.concat(preset_names, "\0") .. "\0")
-    if chg then preset_sel_idx = new_idx end
-
-    if imgui.Button(ctx, "Load", 60, 0) then
+    if imgui.Button(ctx, "Load", color_button_w, 0) then
       local idx = preset_sel_idx + 1
       if idx >= 1 and idx <= MAX_PRESETS and preset_has_data[idx] then
         loadColorPreset(idx)
@@ -508,13 +599,13 @@ local function draw_color_editor_window()
     end
 
     imgui.SameLine(ctx)
-    if imgui.Button(ctx, "Save", 60, 0) then
+    if imgui.Button(ctx, "Save", color_button_w, 0) then
       show_preset_save_popup = true
       preset_input_name = getPresetName(preset_sel_idx + 1) or ("Preset " .. (preset_sel_idx + 1))
     end
 
     imgui.SameLine(ctx)
-    if imgui.Button(ctx, "Delete", 60, 0) then
+    if imgui.Button(ctx, "Delete", color_button_w, 0) then
       local idx = preset_sel_idx + 1
       if idx >= 1 and idx <= MAX_PRESETS then
         deleteColorPreset(idx)
@@ -526,6 +617,7 @@ local function draw_color_editor_window()
 
   if not open then
     show_color_editor = false
+    cancelColorPicker()
   end
 end
 
@@ -651,7 +743,10 @@ local function draw_color_picker_popup()
     imgui.DrawList_AddRectFilled(dl, preview_x, preview_y, preview_x + 28, preview_y + 28, preview_col, 2)
     imgui.DrawList_AddRect(dl, preview_x, preview_y, preview_x + 28, preview_y + 28, 0xFFFFFFFF, 2)
     imgui.InvisibleButton(ctx, "##preview", 28, 28)
-    imgui.SameLine(ctx)
+
+    local preview_controls_y = preview_y + (28 - imgui.GetFrameHeight(ctx)) * 0.5
+    imgui.SetCursorScreenPos(ctx, preview_x + 36, preview_controls_y)
+    imgui.AlignTextToFramePadding(ctx)
     imgui.Text(ctx, "#")
     imgui.SameLine(ctx)
     imgui.PushItemWidth(ctx, 100)
@@ -671,6 +766,7 @@ local function draw_color_picker_popup()
         local u32 = HexToU32(picker_hex_str)
         if u32 then
           COLORS[picker_sel_key] = u32
+          editor_hex_values[picker_sel_key] = picker_hex_str
           picker_h, picker_s, picker_v, picker_a = U32ToHSV(u32)
         end
       end
@@ -696,7 +792,16 @@ local function draw_color_picker_popup()
 
     imgui.Dummy(ctx, 0, 4)
 
-    if imgui.Button(ctx, "OK", 80, 0) then
+    local picker_button_w = 80
+    local picker_button_spacing = imgui.GetStyleVar(ctx, imgui.StyleVar_ItemSpacing)
+    local picker_buttons_total = picker_button_w * 2 + picker_button_spacing
+    local picker_buttons_avail = imgui.GetContentRegionAvail(ctx)
+    imgui.SetCursorPosX(
+      ctx, imgui.GetCursorPosX(ctx) +
+      math.max(0, (picker_buttons_avail - picker_buttons_total) * 0.5)
+    )
+
+    if imgui.Button(ctx, "OK", picker_button_w, 0) then
       acceptColorPicker()
       imgui.End(ctx)
       return
@@ -704,7 +809,7 @@ local function draw_color_picker_popup()
 
     imgui.SameLine(ctx)
 
-    if imgui.Button(ctx, "Cancel", 80, 0) then
+    if imgui.Button(ctx, "Cancel", picker_button_w, 0) then
       cancelColorPicker()
       imgui.End(ctx)
       return
@@ -724,10 +829,29 @@ end
 -- =====================================================================
 local CFG = {
   fps               = 24,
+  nominal_fps       = 24,
+  drop_frame        = false,
   timeline_h        = 54,
   hover_dist        = 6,
+  playhead_drag_dist = 8,
   px_per_label      = 80,
 }
+
+local function detectProjectFrameRate()
+  local fps, drop_frame = reaper.TimeMap_curFrameRate(0)
+  if type(fps) ~= "number" or fps <= 0 then return false end
+
+  local nominal_fps = math.max(1, math.floor(fps + 0.5))
+  drop_frame = drop_frame == true
+  local changed = math.abs(CFG.fps - fps) > 0.000001 or
+    CFG.nominal_fps ~= nominal_fps or
+    CFG.drop_frame ~= drop_frame
+
+  CFG.fps = fps
+  CFG.nominal_fps = nominal_fps
+  CFG.drop_frame = drop_frame
+  return changed
+end
 
 local STATE = {
   comments          = {},
@@ -808,6 +932,8 @@ local function requestMainDock(dock_id)
 end
 
 -- Completed comment tracking
+local updateArrangeMarkerForComment
+
 local function saveCompletedComments()
   if #STATE.current_file == 0 then return end
   local parts = {}
@@ -846,6 +972,9 @@ local function toggleCommentCompleted(c)
     STATE.completed_set[key] = true
   end
   saveCompletedComments()
+  if updateArrangeMarkerForComment then
+    updateArrangeMarkerForComment(c, isCommentCompleted(c))
+  end
 end
 
 local function getCompletionProgress()
@@ -863,18 +992,117 @@ local function tc_to_sec(str)
   if not str then return nil end
   local h, m, s, f = str:match("^(%d+):(%d+):(%d+)[:;](%d+)$")
   if h then
-    return tonumber(h)*3600 + tonumber(m)*60 + tonumber(s) + tonumber(f)/CFG.fps
+    h, m, s, f = tonumber(h), tonumber(m), tonumber(s), tonumber(f)
+    local nominal = CFG.nominal_fps
+    local total_frames = ((h * 3600 + m * 60 + s) * nominal) + f
+
+    if CFG.drop_frame then
+      local dropped_per_minute = math.floor(nominal * 0.066666 + 0.5)
+      local total_minutes = h * 60 + m
+      total_frames = total_frames - dropped_per_minute *
+        (total_minutes - math.floor(total_minutes / 10))
+    end
+
+    return total_frames / CFG.fps
   end
   return nil
 end
 
 local function sec_to_tc(sec)
   sec = math.max(0, sec)
-  local h = math.floor(sec/3600)
-  local m = math.floor((sec%3600)/60)
-  local s = math.floor(sec%60)
-  local f = math.floor((sec%1)*CFG.fps + 0.5)
-  return string.format("%02d:%02d:%02d:%02d", h, m, s, f)
+  local nominal = CFG.nominal_fps
+  local frame_number = math.floor(sec * CFG.fps + 0.5)
+
+  if CFG.drop_frame then
+    local dropped_per_minute = math.floor(nominal * 0.066666 + 0.5)
+    local frames_per_minute = nominal * 60 - dropped_per_minute
+    local frames_per_ten_minutes = nominal * 600 - dropped_per_minute * 9
+    local ten_minute_blocks = math.floor(frame_number / frames_per_ten_minutes)
+    local remaining = frame_number % frames_per_ten_minutes
+
+    frame_number = frame_number + dropped_per_minute * 9 * ten_minute_blocks
+    if remaining > dropped_per_minute then
+      frame_number = frame_number + dropped_per_minute *
+        math.floor((remaining - dropped_per_minute) / frames_per_minute)
+    end
+  end
+
+  local frames_per_hour = nominal * 3600
+  local frames_per_minute_nominal = nominal * 60
+  local h = math.floor(frame_number / frames_per_hour)
+  local remainder = frame_number % frames_per_hour
+  local m = math.floor(remainder / frames_per_minute_nominal)
+  remainder = remainder % frames_per_minute_nominal
+  local s = math.floor(remainder / nominal)
+  local f = remainder % nominal
+  local frame_separator = CFG.drop_frame and ";" or ":"
+  return string.format(
+    "%02d:%02d:%02d%s%02d", h, m, s, frame_separator, f
+  )
+end
+
+local function u32ToNativeMarkerColor(color)
+  local r, g, b = imgui.ColorConvertU32ToDouble4(
+    normalizeColor(color) or 0xFFFFFFFF
+  )
+  return reaper.ColorToNative(
+    math.floor(r * 255 + 0.5),
+    math.floor(g * 255 + 0.5),
+    math.floor(b * 255 + 0.5)
+  ) | 0x1000000
+end
+
+updateArrangeMarkerForComment = function(c, completed)
+  local info = STATE.item_info
+  if not info or not c then return 0 end
+
+  local offset = STATE.use_manual_offset and
+    tc_to_sec(STATE.manual_offset_str) or STATE.tc_offset
+  if not offset then offset = 0 end
+
+  local target_position = info.pos + (c.t - offset)
+  local target_name = c.text:gsub("[\r\n]+", " ")
+  local marker_color = u32ToNativeMarkerColor(
+    completed and COLORS.completed or COLORS.marker
+  )
+
+  local matches = {}
+  local _, marker_count, region_count = reaper.CountProjectMarkers(0)
+  for index = 0, marker_count + region_count - 1 do
+    local ok, is_region, position, region_end, name, marker_id =
+      reaper.EnumProjectMarkers3(0, index)
+    if ok > 0 and not is_region and
+      math.abs(position - target_position) <= 0.0005 and
+      name == target_name then
+      table.insert(matches, {
+        id = marker_id,
+        position = position,
+        region_end = region_end,
+        name = name,
+      })
+    end
+  end
+
+  if #matches > 0 then
+    reaper.Undo_BeginBlock2(0)
+    reaper.PreventUIRefresh(1)
+    for _, marker in ipairs(matches) do
+      reaper.SetProjectMarker3(
+        0, marker.id, false, marker.position, marker.region_end,
+        marker.name, marker_color
+      )
+    end
+    reaper.PreventUIRefresh(-1)
+    reaper.Undo_EndBlock2(
+      0,
+      completed and "Mark Frame.io comment completed" or
+        "Mark Frame.io comment incomplete",
+      -1
+    )
+    reaper.UpdateArrange()
+  end
+
+  return #matches
 end
 
 local function encodeCommentIdPart(value)
@@ -1077,8 +1305,19 @@ end
 -- =====================================================================
 -- 8. TOOLTIP WRAPPER
 -- =====================================================================
-local function set_tooltip_wrapped(text)
+set_tooltip_wrapped = function(text, key)
   if not text or #text == 0 then return end
+  tooltip_seen_this_frame = true
+
+  key = tostring(key or text)
+  local now = reaper.time_precise()
+  if tooltip_hover_key ~= key then
+    tooltip_hover_key = key
+    tooltip_hover_started = now
+    return
+  end
+  if now - tooltip_hover_started < TOOLTIP_DELAY_SECONDS then return end
+
   if imgui.BeginTooltip(ctx) then
     imgui.PushTextWrapPos(ctx, imgui.GetFontSize(ctx) * 35)
     imgui.Text(ctx, text)
@@ -1203,7 +1442,10 @@ local function draw_timeline(info)
       imgui.DrawList_AddLine(dl, x, y_top, x, y_bot, col, thick)
       if is_hov then
         hovered_comment = c
-        set_tooltip_wrapped((is_completed and "[COMPLETED] " or "") .. c.tc .. " | " .. c.text)
+        set_tooltip_wrapped(
+          (is_completed and "[COMPLETED] " or "") .. c.tc .. " | " .. c.text,
+          "timeline_comment_" .. c.id
+        )
         if imgui.IsMouseClicked(ctx, 0) then
           if imgui.IsKeyDown(ctx, imgui.Key_LeftAlt) then
             toggleCommentCompleted(c)
@@ -1219,8 +1461,10 @@ local function draw_timeline(info)
   -- Playhead: triangle pointing down from above, no circle
   local cur_time = get_current_time()
   local rel_time = cur_time - info.pos
+  local playhead_x = nil
   if rel_time >= view_start and rel_time <= view_end then
     local x = time_to_x(rel_time)
+    playhead_x = x
     imgui.DrawList_AddLine(dl, x, cy + 2, x, y2, COLORS.playhead, 2)
     local tip_y = cy + 2
     local base_y = cy - 9
@@ -1237,6 +1481,14 @@ local function draw_timeline(info)
 
   local is_hovered = imgui.IsItemHovered(ctx)
   local is_active = imgui.IsItemActive(ctx)
+  local playhead_hovered = is_hovered and playhead_x and
+    math.abs(mx - playhead_x) <= CFG.playhead_drag_dist
+  if playhead_hovered and not hovered_comment then
+    set_tooltip_wrapped(
+      "Drag the playhead to scrub the REAPER timeline",
+      "timeline_playhead"
+    )
+  end
 
   -- Zoom with mouse wheel
   if is_hovered then
@@ -1256,10 +1508,18 @@ local function draw_timeline(info)
 
   -- Click vs Pan
   if imgui.IsItemClicked(ctx, 0) then
-    STATE.pending_click = true
-    STATE.drag_start_mx = mx
-    STATE.drag_start_view = view_start
-    STATE.drag_mode = nil
+    if playhead_hovered and not hovered_comment then
+      STATE.drag_mode = "scrub"
+      STATE.pending_click = false
+      local click_ratio = math.max(0, math.min(1, (mx - cx) / w))
+      local seek_time = view_start + click_ratio * visible_len
+      reaper.SetEditCurPos(info.pos + seek_time, true, true)
+    else
+      STATE.pending_click = true
+      STATE.drag_start_mx = mx
+      STATE.drag_start_view = view_start
+      STATE.drag_mode = nil
+    end
   end
 
   if is_active and STATE.pending_click then
@@ -1274,6 +1534,14 @@ local function draw_timeline(info)
     local seconds_per_pixel = visible_len / w
     STATE.view_start = math.max(0, math.min(info.len - visible_len,
       STATE.drag_start_view - (mx - STATE.drag_start_mx) * seconds_per_pixel))
+  end
+
+  -- Dragging directly on the playhead continuously seeks REAPER. The seek is
+  -- clamped to the visible timeline range, which is itself inside the item.
+  if STATE.drag_mode == "scrub" and is_active then
+    local scrub_ratio = math.max(0, math.min(1, (mx - cx) / w))
+    local scrub_time = view_start + scrub_ratio * visible_len
+    reaper.SetEditCurPos(info.pos + scrub_time, true, true)
   end
 
   if not is_active and STATE.pending_click then
@@ -1313,6 +1581,75 @@ local function load_frameio_file_dialog()
   return false
 end
 
+local function exportCommentsToProjectMarkers(info)
+  if not info or #STATE.comments == 0 then return end
+
+  local offset = STATE.use_manual_offset and
+    tc_to_sec(STATE.manual_offset_str) or STATE.tc_offset
+  if not offset then offset = 0 end
+
+  local existing = {}
+  local _, marker_count, region_count = reaper.CountProjectMarkers(0)
+  for index = 0, marker_count + region_count - 1 do
+    local ok, is_region, position, _, name =
+      reaper.EnumProjectMarkers3(0, index)
+    if ok > 0 and not is_region then
+      local key = tostring(math.floor(position * 1000 + 0.5)) ..
+        "\0" .. tostring(name or "")
+      existing[key] = true
+    end
+  end
+
+  local incomplete_color = u32ToNativeMarkerColor(COLORS.marker)
+  local completed_color = u32ToNativeMarkerColor(COLORS.completed)
+
+  local pending = {}
+  local skipped_duplicates = 0
+  local skipped_outside = 0
+  for _, c in ipairs(STATE.comments) do
+    local position = info.pos + (c.t - offset)
+    local name = c.text:gsub("[\r\n]+", " ")
+    local key = tostring(math.floor(position * 1000 + 0.5)) ..
+      "\0" .. name
+
+    if position < info.pos - 0.0005 or position > info.end_ + 0.0005 then
+      skipped_outside = skipped_outside + 1
+    elseif existing[key] then
+      skipped_duplicates = skipped_duplicates + 1
+    else
+      table.insert(pending, {
+        position = position,
+        name = name,
+        color = isCommentCompleted(c) and completed_color or incomplete_color,
+      })
+      existing[key] = true
+    end
+  end
+
+  if #pending > 0 then
+    reaper.Undo_BeginBlock2(0)
+    reaper.PreventUIRefresh(1)
+    for _, marker in ipairs(pending) do
+      reaper.AddProjectMarker2(
+        0, false, marker.position, 0, marker.name, -1, marker.color
+      )
+    end
+    reaper.PreventUIRefresh(-1)
+    reaper.Undo_EndBlock2(
+      0, "Export Frame.io comments as project markers", -1
+    )
+    reaper.UpdateArrange()
+  end
+
+  reaper.ShowMessageBox(
+    string.format(
+      "Created: %d\nSkipped existing: %d\nOutside selected/locked item: %d",
+      #pending, skipped_duplicates, skipped_outside
+    ),
+    "Frame.io Marker Export", 0
+  )
+end
+
 -- =====================================================================
 -- 11. COMMENT LIST WINDOW
 -- =====================================================================
@@ -1348,13 +1685,21 @@ local function draw_comment_list_window()
       saveWindowRect("comment_window", rect.x, rect.y, rect.w, rect.h)
     end
 
+    local info = STATE.item_info
     if imgui.IsWindowFocused(ctx, imgui.FocusedFlags_RootAndChildWindows) then
       if imgui.IsKeyPressed(ctx, imgui.Key_Escape) then
         STATE.show_comment_window = false
         saveSetting("show_comment_window", 0)
+      elseif info and not imgui.IsAnyItemActive(ctx) then
+        if imgui.IsKeyPressed(ctx, imgui.Key_LeftArrow) or
+          imgui.IsKeyPressed(ctx, imgui.Key_UpArrow) then
+          go_to_prev_comment(info)
+        elseif imgui.IsKeyPressed(ctx, imgui.Key_RightArrow) or
+          imgui.IsKeyPressed(ctx, imgui.Key_DownArrow) then
+          go_to_next_comment(info)
+        end
       end
     end
-    local info = STATE.item_info
     if not info then
       imgui.TextColored(ctx, COLORS.warn, "No item locked or selected.")
     else
@@ -1382,7 +1727,8 @@ local function draw_comment_list_window()
       end
       if imgui.IsItemHovered(ctx) then
         set_tooltip_wrapped(
-          "Highlight the comment at the playhead and automatically keep it visible in this list."
+          "Highlight the comment at the playhead and automatically keep it visible in this list.",
+          "comment_list_follow"
         )
       end
       imgui.SameLine(ctx)
@@ -1475,7 +1821,10 @@ local function draw_comment_list_window()
             toggleCommentCompleted(c)
           end
           if imgui.IsItemHovered(ctx) then
-            set_tooltip_wrapped("Mark this comment completed")
+            set_tooltip_wrapped(
+              "Mark this comment completed",
+              "comment_complete_" .. c.id
+            )
           end
           imgui.SameLine(ctx)
 
@@ -1526,6 +1875,11 @@ end
 -- =====================================================================
 local function loop()
   if not STATE.main_open then return end
+  tooltip_seen_this_frame = false
+
+  if detectProjectFrameRate() and #STATE.current_file > 0 then
+    parse_file(STATE.current_file)
+  end
   
   local info = nil
   if STATE.locked_item then
@@ -1582,17 +1936,13 @@ local function loop()
         imgui.EndMenu(ctx)
       end
 
-      if imgui.BeginMenu(ctx, "View") then
-        local label = STATE.show_comment_window and "Hide Comment List" or "Show Comment List"
-        if imgui.MenuItem(ctx, label) then
-          STATE.show_comment_window = not STATE.show_comment_window
-          saveSetting("show_comment_window", STATE.show_comment_window and 1 or 0)
-          if STATE.show_comment_window then
-            STATE.comment_win_first_open = true
-            if STATE.follow_current_comment and STATE.active_comment then
-              STATE.scroll_to_comment = STATE.active_comment
-            end
-          end
+      if imgui.BeginMenu(ctx, "Export") then
+        local can_export_markers = info ~= nil and #STATE.comments > 0
+        if imgui.MenuItem(
+          ctx, "Create REAPER Markers from Comments",
+          nil, false, can_export_markers
+        ) then
+          exportCommentsToProjectMarkers(info)
         end
         imgui.EndMenu(ctx)
       end
@@ -1649,7 +1999,11 @@ local function loop()
       imgui.SameLine(ctx)
       imgui.Text(ctx, STATE.item_info.name .. "  |  Length: " .. sec_to_tc(STATE.item_info.len))
       if imgui.IsItemHovered(ctx) then
-        set_tooltip_wrapped("Start: " .. sec_to_tc(STATE.item_info.pos) .. "\nEnd: " .. sec_to_tc(STATE.item_info.end_))
+        set_tooltip_wrapped(
+          "Start: " .. sec_to_tc(STATE.item_info.pos) ..
+          "\nEnd: " .. sec_to_tc(STATE.item_info.end_),
+          "locked_item_info"
+        )
       end
       -- Manual offset controls are only visible while an item is locked.
       imgui.SameLine(ctx)
@@ -1661,12 +2015,13 @@ local function loop()
       if imgui.IsItemHovered(ctx) then
         set_tooltip_wrapped(
           "Override the automatically detected Frame.io timecode offset.\n" ..
-          "Detected offset: " .. sec_to_tc(STATE.tc_offset)
+          "Detected offset: " .. sec_to_tc(STATE.tc_offset),
+          "manual_tc_offset"
         )
       end
       if STATE.use_manual_offset then
         imgui.SameLine(ctx)
-        imgui.PushItemWidth(ctx, 110)
+        imgui.PushItemWidth(ctx, 80)
         local chg2, newtxt = imgui.InputText(ctx, "##off", STATE.manual_offset_str,
           imgui.InputTextFlags_CharsNoBlank + imgui.InputTextFlags_EnterReturnsTrue)
         imgui.PopItemWidth(ctx)
@@ -1676,7 +2031,8 @@ local function loop()
         end
         if imgui.IsItemHovered(ctx) then
           set_tooltip_wrapped(
-            "Enter the Frame.io timecode that should line up with the locked item's start."
+            "Enter the Frame.io timecode that should line up with the locked item's start.",
+            "manual_tc_offset_field"
           )
         end
       end
@@ -1745,7 +2101,8 @@ local function loop()
       end
       if imgui.IsItemHovered(ctx) then
         set_tooltip_wrapped(
-          "Follow Current Comment: keep the playhead's active comment highlighted and visible in the comment list."
+          "Follow Current Comment: keep the playhead's active comment highlighted and visible in the comment list.",
+          "main_follow"
         )
       end
       imgui.SameLine(ctx)
@@ -1814,6 +2171,11 @@ local function loop()
   -- =====================================================================
   draw_color_picker_popup()
 
+  if not tooltip_seen_this_frame then
+    tooltip_hover_key = nil
+    tooltip_hover_started = 0
+  end
+
   if STATE.main_open then
     reaper.defer(loop)
   end
@@ -1824,5 +2186,5 @@ end
 -- =====================================================================
 loadColors()
 loadWorkflowSettings()
+detectProjectFrameRate()
 loop()
-
