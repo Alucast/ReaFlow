@@ -5,7 +5,7 @@
 @about
   Reads Frame.io exported .txt comment files and displays a visual timeline
   with markers synced to a locked video item in REAPER's arrange view.
-  Requires the ReaImGui extension (v0.9+).
+  Requires ReaImGui (v0.9+).
 --]]
 
 -- =====================================================================
