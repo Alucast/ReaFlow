@@ -1,6 +1,6 @@
 --[[
 @description Frame.io Timeline Comment Viewer
-@version 2.8.1
+@version 2.9.1
 @author Assistant
 @about
   Reads Frame.io exported .txt comment files and displays a visual timeline
@@ -75,6 +75,7 @@ local COLOR_PRESETS = {
   {key="active",     label="Active Text",     default=0xFFFFE0FF},
   {key="warn",       label="Warnings",        default=0xFF3D3DFF},
   {key="completed",  label="Completed",       default=0xFF9BFFFF},
+  {key="active_completed", label="Active Completed", default=0xFFFF9F43},
 }
 
 local COLORS = {}
@@ -492,7 +493,7 @@ local function draw_color_editor_window()
           editor_hex_values[preset.key] = U32ToHex(color)
         end
 
-        imgui.TableNextRow(ctx, 0, EDITOR_SWATCH_SIZE + 8)
+        imgui.TableNextRow(ctx, 0, EDITOR_SWATCH_SIZE + 4)
         imgui.TableSetColumnIndex(ctx, 0)
         imgui.PushID(ctx, preset.key)
 
@@ -883,6 +884,7 @@ local STATE = {
   comment_win_rect  = {x = 0, y = 0, w = 0, h = 0, applied = false},
   current_dock_id   = 0,
   pending_dock_id   = nil,
+  active_project    = nil,
 }
 
 local function loadWorkflowSettings()
@@ -1198,6 +1200,58 @@ local function parse_file(path)
   return true
 end
 
+-- The selected Frame.io file is stored in the REAPER project itself. This
+-- lets every project reopen its own comment export instead of sharing one
+-- global "last used" file.
+local PROJECT_STATE_SECTION = "FrameioTimelineViewer"
+local PROJECT_FILE_KEY = "frameio_txt_path"
+
+local function getCurrentProject()
+  return select(1, reaper.EnumProjects(-1, ""))
+end
+
+local function rememberFrameioFileForProject(path)
+  local project = STATE.active_project or getCurrentProject()
+  if not project or type(path) ~= "string" or path == "" then return end
+  reaper.SetProjExtState(
+    project, PROJECT_STATE_SECTION, PROJECT_FILE_KEY, path
+  )
+  reaper.MarkProjectDirty(project)
+end
+
+local function loadRememberedFrameioFile(project)
+  if not project then return false end
+  local found, path = reaper.GetProjExtState(
+    project, PROJECT_STATE_SECTION, PROJECT_FILE_KEY
+  )
+  if found <= 0 or type(path) ~= "string" or path == "" then return false end
+  if not reaper.file_exists(path) then return false end
+  return select(1, parse_file(path))
+end
+
+local function switchToCurrentProject()
+  local project = getCurrentProject()
+  if project == STATE.active_project then return false end
+
+  STATE.active_project = project
+  STATE.comments = {}
+  STATE.current_file = ""
+  STATE.completed_set = {}
+  STATE.locked_item = nil
+  STATE.last_item_ptr = nil
+  STATE.item_info = nil
+  STATE.active_comment = nil
+  STATE.active_comment_id = nil
+  STATE.scroll_to_comment = nil
+  STATE.view_start = 0
+  STATE.drag_mode = nil
+  STATE.pending_click = false
+
+  detectProjectFrameRate()
+  loadRememberedFrameioFile(project)
+  return true
+end
+
 -- =====================================================================
 -- 6. ADAPTIVE GRID
 -- =====================================================================
@@ -1429,7 +1483,9 @@ local function draw_timeline(info)
       local is_current = c.id == STATE.active_comment_id
       local is_completed = isCommentCompleted(c)
       local col
-      if is_completed then
+      if is_completed and is_current then
+        col = COLORS.active_completed
+      elseif is_completed then
         col = COLORS.completed
       elseif is_current then
         col = COLORS.active
@@ -1578,13 +1634,138 @@ local function load_frameio_file_dialog()
   if ret and #path > 0 then
     local ok, err = parse_file(path)
     if ok then
-      STATE.current_file = path
+      rememberFrameioFileForProject(path)
       return true
     else
       reaper.ShowMessageBox(err or "Parse error", "Error", 0)
     end
   end
   return false
+end
+
+local COMMENT_TRACK_TAG = "FrameioTimelineComments"
+local COMMENT_TRACK_NAME = "Frame.io Comments"
+
+local function findCommentExportTrack()
+  for track_index = 0, reaper.CountTracks(0) - 1 do
+    local track = reaper.GetTrack(0, track_index)
+    local _, tag = reaper.GetSetMediaTrackInfo_String(
+      track, "P_EXT:" .. COMMENT_TRACK_TAG, "", false
+    )
+    if tag == "1" then return track end
+  end
+  return nil
+end
+
+local function createCommentExportTrack()
+  local track_index = reaper.CountTracks(0)
+  reaper.InsertTrackAtIndex(track_index, true)
+  local track = reaper.GetTrack(0, track_index)
+  if track then
+    reaper.GetSetMediaTrackInfo_String(
+      track, "P_NAME", COMMENT_TRACK_NAME, true
+    )
+    reaper.GetSetMediaTrackInfo_String(
+      track, "P_EXT:" .. COMMENT_TRACK_TAG, "1", true
+    )
+  end
+  return track
+end
+
+local function makeCommentItemKey(position, notes)
+  return tostring(math.floor(position * 1000 + 0.5)) ..
+    "\0" .. tostring(notes or "")
+end
+
+local function exportCommentsToEmptyItems(info)
+  if not info or #STATE.comments == 0 then return end
+
+  local offset = STATE.use_manual_offset and
+    tc_to_sec(STATE.manual_offset_str) or STATE.tc_offset
+  if not offset then offset = 0 end
+
+  local eligible = {}
+  local skipped_outside = 0
+  for _, c in ipairs(STATE.comments) do
+    local position = info.pos + (c.t - offset)
+    if position < info.pos - 0.0005 or position > info.end_ + 0.0005 then
+      skipped_outside = skipped_outside + 1
+    else
+      table.insert(eligible, {
+        position = math.max(info.pos, math.min(info.end_, position)),
+        notes = c.text,
+      })
+    end
+  end
+
+  local track = findCommentExportTrack()
+  local existing = {}
+  if track then
+    for item_index = 0, reaper.CountTrackMediaItems(track) - 1 do
+      local item = reaper.GetTrackMediaItem(track, item_index)
+      local position = reaper.GetMediaItemInfo_Value(item, "D_POSITION")
+      local _, notes = reaper.GetSetMediaItemInfo_String(
+        item, "P_NOTES", "", false
+      )
+      existing[makeCommentItemKey(position, notes)] = true
+    end
+  end
+
+  local pending = {}
+  local skipped_duplicates = 0
+  local minimum_length = 1 / math.max(CFG.fps, 1)
+  for index, entry in ipairs(eligible) do
+    local key = makeCommentItemKey(entry.position, entry.notes)
+    if existing[key] then
+      skipped_duplicates = skipped_duplicates + 1
+    else
+      local next_position = eligible[index + 1] and
+        eligible[index + 1].position or info.end_
+      local length = math.max(
+        minimum_length,
+        math.min(info.end_, next_position) - entry.position
+      )
+      table.insert(pending, {
+        position = entry.position,
+        length = length,
+        notes = entry.notes,
+      })
+      existing[key] = true
+    end
+  end
+
+  local created = 0
+  if #pending > 0 then
+    reaper.Undo_BeginBlock2(0)
+    reaper.PreventUIRefresh(1)
+    if not track then track = createCommentExportTrack() end
+
+    if track then
+      for _, entry in ipairs(pending) do
+        local item = reaper.AddMediaItemToTrack(track)
+        reaper.SetMediaItemInfo_Value(item, "D_POSITION", entry.position)
+        reaper.SetMediaItemInfo_Value(item, "D_LENGTH", entry.length)
+        reaper.GetSetMediaItemInfo_String(
+          item, "P_NOTES", entry.notes, true
+        )
+        created = created + 1
+      end
+    end
+
+    reaper.PreventUIRefresh(-1)
+    reaper.Undo_EndBlock2(
+      0, "Export Frame.io comments as empty items", -1
+    )
+    reaper.UpdateArrange()
+  end
+
+  reaper.ShowMessageBox(
+    string.format(
+      "Created: %d\nSkipped existing: %d\nOutside selected/locked item: %d",
+      created, skipped_duplicates, skipped_outside
+    ),
+    "Frame.io Empty Item Export", 0
+  )
 end
 
 local function exportCommentsToProjectMarkers(info)
@@ -1712,7 +1893,11 @@ local function draw_comment_list_window()
       local offset = STATE.use_manual_offset and tc_to_sec(STATE.manual_offset_str) or STATE.tc_offset
       if not offset then offset = 0 end
 
-      -- Navigation buttons at top
+      -- Navigation controls stay on one row when there is room and reflow
+      -- vertically in narrower windows.
+      local header_w = select(1, imgui.GetContentRegionAvail(ctx))
+      local compact_header = header_w < 700
+
       if imgui.Button(ctx, "< Prev Comment") then
         go_to_prev_comment(info)
       end
@@ -1720,7 +1905,8 @@ local function draw_comment_list_window()
       if imgui.Button(ctx, "Next Comment >") then
         go_to_next_comment(info)
       end
-      imgui.SameLine(ctx)
+      if not compact_header then imgui.SameLine(ctx) end
+
       local follow_changed, follow_value = imgui.Checkbox(
         ctx, "Follow Current Comment", STATE.follow_current_comment
       )
@@ -1737,7 +1923,8 @@ local function draw_comment_list_window()
           "comment_list_follow"
         )
       end
-      imgui.SameLine(ctx)
+
+      if not compact_header then imgui.SameLine(ctx) end
       imgui.Text(ctx, "Cursor: " .. sec_to_tc(get_current_time()))
 
       imgui.Text(ctx, "Search")
@@ -1750,6 +1937,16 @@ local function draw_comment_list_window()
       imgui.PopItemWidth(ctx)
       if search_changed then STATE.comment_search = search_value end
 
+      local progress_text = string.format(
+        "Completed: %d / %d (%d%%)",
+        completed_count, total_count,
+        total_count > 0 and
+          math.floor(completed_count / total_count * 100 + 0.5) or 0
+      )
+      local filter_row_w = select(1, imgui.GetContentRegionAvail(ctx))
+      local progress_w = imgui.CalcTextSize(ctx, progress_text)
+      local filter_and_progress_fit = filter_row_w >= 225 + progress_w
+
       imgui.Text(ctx, "Show")
       imgui.SameLine(ctx)
       imgui.PushItemWidth(ctx, 130)
@@ -1760,12 +1957,8 @@ local function draw_comment_list_window()
       imgui.PopItemWidth(ctx)
       if filter_changed then STATE.comment_filter = filter_value end
 
-      imgui.SameLine(ctx)
-      imgui.Text(ctx, string.format(
-        "Completed: %d / %d (%d%%)",
-        completed_count, total_count,
-        total_count > 0 and math.floor(completed_count / total_count * 100 + 0.5) or 0
-      ))
+      if filter_and_progress_fit then imgui.SameLine(ctx) end
+      imgui.Text(ctx, progress_text)
       imgui.Separator(ctx)
 
       local display_comments = {}
@@ -1802,7 +1995,11 @@ local function draw_comment_list_window()
         end
       end
 
-      local list_h = math.max(120, imgui.GetContentRegionAvail(ctx) - 4)
+      -- GetContentRegionAvail returns width, height. The old one-value form
+      -- accidentally used the remaining width as the child height, so making
+      -- this window narrow also made the list short and clipped wrapped rows.
+      local _, remaining_h = imgui.GetContentRegionAvail(ctx)
+      local list_h = math.max(120, remaining_h - 4)
       if imgui.BeginChild(ctx, "##clist", 0, list_h, 0) then
         if #display_comments == 0 then
           imgui.TextDisabled(ctx, "No comments match the current search and filter.")
@@ -1815,7 +2012,9 @@ local function draw_comment_list_window()
           local is_completed = isCommentCompleted(c)
 
           imgui.PushID(ctx, c.id)
-          if is_completed then
+          if is_completed and is_active then
+            imgui.PushStyleColor(ctx, imgui.Col_Text, COLORS.active_completed)
+          elseif is_completed then
             imgui.PushStyleColor(ctx, imgui.Col_Text, COLORS.completed)
           elseif is_active then
             imgui.PushStyleColor(ctx, imgui.Col_Text, COLORS.active)
@@ -1883,7 +2082,9 @@ local function loop()
   if not STATE.main_open then return end
   tooltip_seen_this_frame = false
 
-  if detectProjectFrameRate() and #STATE.current_file > 0 then
+  if switchToCurrentProject() then
+    -- The new project has already loaded its own remembered comment file.
+  elseif detectProjectFrameRate() and #STATE.current_file > 0 then
     parse_file(STATE.current_file)
   end
   
@@ -1943,12 +2144,18 @@ local function loop()
       end
 
       if imgui.BeginMenu(ctx, "Export") then
-        local can_export_markers = info ~= nil and #STATE.comments > 0
+        local can_export_comments = info ~= nil and #STATE.comments > 0
         if imgui.MenuItem(
           ctx, "Create REAPER Markers from Comments",
-          nil, false, can_export_markers
+          nil, false, can_export_comments
         ) then
           exportCommentsToProjectMarkers(info)
+        end
+        if imgui.MenuItem(
+          ctx, "Create Empty Items with Comment Notes",
+          nil, false, can_export_comments
+        ) then
+          exportCommentsToEmptyItems(info)
         end
         imgui.EndMenu(ctx)
       end
@@ -2192,5 +2399,5 @@ end
 -- =====================================================================
 loadColors()
 loadWorkflowSettings()
-detectProjectFrameRate()
+switchToCurrentProject()
 loop()
