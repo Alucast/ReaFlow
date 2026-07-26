@@ -188,11 +188,5 @@
       </version>
     </reapack>
     
-    <reapack name="Alu_Smart Record.eel" type="script" desc="Alu_Smart Record">
-      <version name="1.0" author="Alu">
-        <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/Alu_Smart%20Record.eel</source>
-      </version>
-    </reapack>
-    
   </category>
 </index>
