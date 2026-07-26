@@ -82,13 +82,13 @@
     
     <reapack name="Alu_Insert empty item of certain length.lua" type="script" desc="Alu_Insert empty item of certain length">
       <version name="1.2" author="Alu">
-        <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/Alu_Insert%20empty%20item%20of%20certain%20length.lua</source>
+        <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Utilities/Alu_Insert%20empty%20item%20of%20certain%20length.lua</source>
       </version>
     </reapack>
     
     <reapack name="Alu_Item counter.lua" type="script" desc="Alu_Item counter">
       <version name="1.0" author="Alu">
-        <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/Alu_Item%20counter.lua</source>
+        <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Utilities/Alu_Item%20counter.lua</source>
       </version>
     </reapack>
     
@@ -106,13 +106,13 @@
     
     <reapack name="Alu_MIDI Note Length Adjuster with Ripple.lua" type="script" desc="Alu_MIDI Note Length Adjuster with Ripple">
       <version name="1.0" author="Alu">
-        <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/Alu_MIDI%20Note%20Length%20Adjuster%20with%20Ripple.lua</source>
+        <source main="midi_editor">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Utilities/Alu_MIDI%20Note%20Length%20Adjuster%20with%20Ripple.lua</source>
       </version>
     </reapack>
     
     <reapack name="Alu_Metronome Volume Slider.lua" type="script" desc="Alu_Metronome Volume Slider">
       <version name="1.0" author="Alu">
-        <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/Alu_Metronome%20Volume%20Slider.lua</source>
+        <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Utilities/Alu_Metronome%20Volume%20Slider.lua</source>
       </version>
     </reapack>
     
@@ -154,13 +154,13 @@
     
     <reapack name="Alu_Project Timer.lua" type="script" desc="Alu_Project Timer">
       <version name="1.0" author="Alu">
-        <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/Alu_Project%20Timer.lua</source>
+        <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Utilities/Alu_Project%20Timer.lua</source>
       </version>
     </reapack>
     
     <reapack name="Alu_Quick Send.lua" type="script" desc="Alu_Quick Send">
       <version name="3.7" author="Alu">
-        <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Scripts/Alu_Quick%20Send.lua</source>
+        <source main="main">https://github.com/Alucast/ReaFlow/raw/refs/heads/main/Utilities/Alu_Quick%20Send.lua</source>
       </version>
     </reapack>
     
