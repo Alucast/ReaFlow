@@ -1,7 +1,7 @@
 --[[
 @description Frame.io Timeline Comment Viewer
 @version 2.9.1
-@author Assistant
+@author Alu
 @about
   Reads Frame.io exported .txt comment files and displays a visual timeline
   with markers synced to a locked video item in REAPER's arrange view.
