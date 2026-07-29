@@ -1,6 +1,6 @@
 --[[
 @description Frame.io Timeline Comment Viewer
-@version 2.11.7
+@version 2.14.1
 @author Alu
 @about
   Reads Frame.io exported .txt comment files and displays a visual timeline
@@ -712,7 +712,10 @@ local function draw_color_picker_popup()
     ctx, 270 * scale, 315 * scale, 520 * scale, 650 * scale
   )
 
-  local popup_flags = imgui.WindowFlags_NoCollapse
+  local popup_flags =
+    imgui.WindowFlags_NoCollapse +
+    imgui.WindowFlags_NoScrollbar +
+    imgui.WindowFlags_NoScrollWithMouse
 
   local preset_label = ""
   for _, p in ipairs(COLOR_PRESETS) do
@@ -1040,7 +1043,7 @@ local function requestMainDock(dock_id)
 end
 
 -- Completed comment tracking
-local updateArrangeMarkerForComment
+local updateArrangeExportsForComment
 
 local function saveCompletedComments()
   if #STATE.current_file == 0 then return end
@@ -1080,8 +1083,8 @@ local function toggleCommentCompleted(c)
     STATE.completed_set[key] = true
   end
   saveCompletedComments()
-  if updateArrangeMarkerForComment then
-    updateArrangeMarkerForComment(c, isCommentCompleted(c))
+  if updateArrangeExportsForComment then
+    updateArrangeExportsForComment(c, isCommentCompleted(c))
   end
 end
 
@@ -1096,57 +1099,117 @@ end
 -- =====================================================================
 -- 4. HELPERS
 -- =====================================================================
-local function tc_to_sec(str)
-  if not str then return nil end
-  local h, m, s, f = str:match("^(%d+):(%d+):(%d+)[:;](%d+)$")
-  if h then
-    h, m, s, f = tonumber(h), tonumber(m), tonumber(s), tonumber(f)
-    local nominal = CFG.nominal_fps
-    local total_frames = ((h * 3600 + m * 60 + s) * nominal) + f
+local DF_ACTUAL_FPS = 30000 / 1001
+local DF_NOMINAL_FPS = 30
+local DF_DROP_FRAMES = 2
 
-    if CFG.drop_frame then
-      local dropped_per_minute = math.floor(nominal * 0.066666 + 0.5)
-      local total_minutes = h * 60 + m
-      total_frames = total_frames - dropped_per_minute *
-        (total_minutes - math.floor(total_minutes / 10))
-    end
+local function is2997DropFrameProject()
+  return CFG.drop_frame and CFG.nominal_fps == DF_NOMINAL_FPS and
+    math.abs(CFG.fps - DF_ACTUAL_FPS) < 0.01
+end
 
-    return total_frames / CFG.fps
+local function dfTimecodeToSeconds(str)
+  local hours, minutes, seconds, frames =
+    str:match("^(%d+):(%d+):(%d+)[:;](%d+)$")
+  hours = tonumber(hours)
+  minutes = tonumber(minutes)
+  seconds = tonumber(seconds)
+  frames = tonumber(frames)
+
+  if not hours or not minutes or not seconds or not frames or
+    minutes >= 60 or seconds >= 60 or frames >= DF_NOMINAL_FPS then
+    return nil
   end
-  return nil
+
+  -- In 29.97DF, labels 00 and 01 do not exist at the start of each
+  -- minute except minutes divisible by ten.
+  if minutes % 10 ~= 0 and seconds == 0 and frames < DF_DROP_FRAMES then
+    return nil
+  end
+
+  local total_minutes = hours * 60 + minutes
+  local dropped_labels = DF_DROP_FRAMES *
+    (total_minutes - math.floor(total_minutes / 10))
+  local frame_number =
+    ((hours * 3600 + minutes * 60 + seconds) * DF_NOMINAL_FPS + frames) -
+    dropped_labels
+
+  return frame_number / DF_ACTUAL_FPS
+end
+
+local function linear2997TimecodeToSeconds(str)
+  local hours, minutes, seconds, frames =
+    str:match("^(%d+):(%d+):(%d+):(%d+)$")
+  hours = tonumber(hours)
+  minutes = tonumber(minutes)
+  seconds = tonumber(seconds)
+  frames = tonumber(frames)
+
+  if not hours or not minutes or not seconds or not frames or
+    minutes >= 60 or seconds >= 60 or frames >= DF_NOMINAL_FPS then
+    return nil
+  end
+
+  local frame_number =
+    (hours * 3600 + minutes * 60 + seconds) * DF_NOMINAL_FPS + frames
+  return frame_number / DF_ACTUAL_FPS
+end
+
+local function secondsToLinear2997Timecode(sec)
+  local frame_number = math.max(
+    0, math.floor(math.max(0, sec or 0) * DF_ACTUAL_FPS + 0.5)
+  )
+  local frames = frame_number % DF_NOMINAL_FPS
+  local total_seconds = math.floor(frame_number / DF_NOMINAL_FPS)
+  local seconds = total_seconds % 60
+  local total_minutes = math.floor(total_seconds / 60)
+  local minutes = total_minutes % 60
+  local hours = math.floor(total_minutes / 60)
+
+  return string.format(
+    "%02d:%02d:%02d:%02d", hours, minutes, seconds, frames
+  )
+end
+
+local function tc_to_sec(str)
+  if type(str) ~= "string" then return nil end
+  if not str:match("^%d+:%d+:%d+[:;]%d+$") then return nil end
+
+  if is2997DropFrameProject() then
+    -- A semicolon explicitly identifies SMPTE drop-frame labels. Frame.io
+    -- exports and REAPER's visible clock use colon labels, which REAPER
+    -- presents as a continuous 29.97 frame count. Keeping those paths
+    -- separate prevents the dropped-label correction from being applied
+    -- twice.
+    if str:find(";", 1, true) then
+      return dfTimecodeToSeconds(str)
+    end
+    return linear2997TimecodeToSeconds(str)
+  end
+
+  -- REAPER's native conversion remains the source of truth for every
+  -- non-drop-frame project format.
+  return reaper.parse_timestr_len(str:gsub(";", ":"), 0, 5)
 end
 
 local function sec_to_tc(sec)
-  sec = math.max(0, sec)
-  local nominal = CFG.nominal_fps
-  local frame_number = math.floor(sec * CFG.fps + 0.5)
+  if is2997DropFrameProject() then
+    return secondsToLinear2997Timecode(sec)
+  end
+  return reaper.format_timestr_len(math.max(0, sec or 0), "", 0, 5)
+end
 
-  if CFG.drop_frame then
-    local dropped_per_minute = math.floor(nominal * 0.066666 + 0.5)
-    local frames_per_minute = nominal * 60 - dropped_per_minute
-    local frames_per_ten_minutes = nominal * 600 - dropped_per_minute * 9
-    local ten_minute_blocks = math.floor(frame_number / frames_per_ten_minutes)
-    local remaining = frame_number % frames_per_ten_minutes
-
-    frame_number = frame_number + dropped_per_minute * 9 * ten_minute_blocks
-    if remaining > dropped_per_minute then
-      frame_number = frame_number + dropped_per_minute *
-        math.floor((remaining - dropped_per_minute) / frames_per_minute)
-    end
+local function project_sec_to_tc(sec)
+  if is2997DropFrameProject() then
+    local project_offset = reaper.GetProjectTimeOffset(0, true)
+    return secondsToLinear2997Timecode(
+      math.max(0, (sec or 0) + (project_offset or 0))
+    )
   end
 
-  local frames_per_hour = nominal * 3600
-  local frames_per_minute_nominal = nominal * 60
-  local h = math.floor(frame_number / frames_per_hour)
-  local remainder = frame_number % frames_per_hour
-  local m = math.floor(remainder / frames_per_minute_nominal)
-  remainder = remainder % frames_per_minute_nominal
-  local s = math.floor(remainder / nominal)
-  local f = remainder % nominal
-  local frame_separator = CFG.drop_frame and ";" or ":"
-  return string.format(
-    "%02d:%02d:%02d%s%02d", h, m, s, frame_separator, f
-  )
+  -- Absolute non-DF positions use REAPER's position formatter so the
+  -- project's timeline-start offset is included.
+  return reaper.format_timestr_pos(math.max(0, sec or 0), "", 5)
 end
 
 local function u32ToNativeMarkerColor(color)
@@ -1158,62 +1221,6 @@ local function u32ToNativeMarkerColor(color)
     math.floor(g * 255 + 0.5),
     math.floor(b * 255 + 0.5)
   ) | 0x1000000
-end
-
-updateArrangeMarkerForComment = function(c, completed)
-  local info = STATE.item_info
-  if not info or not c then return 0 end
-
-  local offset = STATE.use_manual_offset and
-    tc_to_sec(STATE.manual_offset_str) or STATE.tc_offset
-  if not offset then offset = 0 end
-
-  local target_position = info.pos + (c.t - offset)
-  local target_name = c.text:gsub("[\r\n]+", " ")
-  local marker_color = u32ToNativeMarkerColor(
-    completed and COLORS.completed or COLORS.marker
-  )
-
-  local matches = {}
-  local _, marker_count, region_count = reaper.CountProjectMarkers(0)
-  for index = 0, marker_count + region_count - 1 do
-    local ok, is_region, position, region_end, name, marker_id =
-      reaper.EnumProjectMarkers3(0, index)
-    -- Text-free exports create unnamed markers. Match either the original
-    -- comment text or an empty marker name so completion color changes keep
-    -- working in both export modes.
-    if ok > 0 and not is_region and
-      math.abs(position - target_position) <= 0.0005 and
-      (name == target_name or name == "") then
-      table.insert(matches, {
-        id = marker_id,
-        position = position,
-        region_end = region_end,
-        name = name,
-      })
-    end
-  end
-
-  if #matches > 0 then
-    reaper.Undo_BeginBlock2(0)
-    reaper.PreventUIRefresh(1)
-    for _, marker in ipairs(matches) do
-      reaper.SetProjectMarker3(
-        0, marker.id, false, marker.position, marker.region_end,
-        marker.name, marker_color
-      )
-    end
-    reaper.PreventUIRefresh(-1)
-    reaper.Undo_EndBlock2(
-      0,
-      completed and "Mark Frame.io comment completed" or
-        "Mark Frame.io comment incomplete",
-      -1
-    )
-    reaper.UpdateArrange()
-  end
-
-  return #matches
 end
 
 local function encodeCommentIdPart(value)
@@ -1494,7 +1501,7 @@ end
 -- =====================================================================
 local function handle_keyboard(info)
   if not info then return end
-  
+
   -- ESC closes comment window first, then main window
   if imgui.IsKeyPressed(ctx, imgui.Key_Escape) then
     if STATE.show_comment_window then
@@ -1505,7 +1512,7 @@ local function handle_keyboard(info)
     end
     return
   end
-  
+
   -- Arrow keys for navigation (Left/Up = prev, Right/Down = next)
   if imgui.IsKeyPressed(ctx, imgui.Key_LeftArrow) or imgui.IsKeyPressed(ctx, imgui.Key_UpArrow) then
     go_to_prev_comment(info)
@@ -1776,6 +1783,8 @@ end
 
 local COMMENT_TRACK_TAG = "FrameioTimelineComments"
 local COMMENT_TRACK_NAME = "Frame.io Comments"
+local COMMENT_ITEM_ID_TAG = "FrameioTimelineCommentId"
+local COMMENT_POSITION_EPSILON = 0.0005
 
 local function findCommentExportTrack()
   for track_index = 0, reaper.CountTracks(0) - 1 do
@@ -1801,6 +1810,92 @@ local function createCommentExportTrack()
     )
   end
   return track
+end
+
+updateArrangeExportsForComment = function(c, completed)
+  local info = STATE.item_info
+  if not info or not c then return 0 end
+
+  local offset = STATE.use_manual_offset and
+    tc_to_sec(STATE.manual_offset_str) or STATE.tc_offset
+  if not offset then offset = 0 end
+
+  local target_position = info.pos + (c.t - offset)
+  local target_name = c.text:gsub("[\r\n]+", " ")
+  local export_color = u32ToNativeMarkerColor(
+    completed and COLORS.completed or COLORS.marker
+  )
+
+  local marker_matches = {}
+  local _, marker_count, region_count = reaper.CountProjectMarkers(0)
+  for index = 0, marker_count + region_count - 1 do
+    local ok, is_region, position, region_end, name, marker_id =
+      reaper.EnumProjectMarkers3(0, index)
+    -- Text-free exports create unnamed markers. Match either the original
+    -- comment text or an empty marker name so both export modes stay synced.
+    if ok > 0 and not is_region and
+      math.abs(position - target_position) <= COMMENT_POSITION_EPSILON and
+      (name == target_name or name == "") then
+      table.insert(marker_matches, {
+        id = marker_id,
+        position = position,
+        region_end = region_end,
+        name = name,
+      })
+    end
+  end
+
+  local item_matches = {}
+  local track = findCommentExportTrack()
+  if track then
+    for item_index = 0, reaper.CountTrackMediaItems(track) - 1 do
+      local item = reaper.GetTrackMediaItem(track, item_index)
+      local position = reaper.GetMediaItemInfo_Value(item, "D_POSITION")
+      local _, comment_id = reaper.GetSetMediaItemInfo_String(
+        item, "P_EXT:" .. COMMENT_ITEM_ID_TAG, "", false
+      )
+      local _, notes = reaper.GetSetMediaItemInfo_String(
+        item, "P_NOTES", "", false
+      )
+
+      local id_match = comment_id ~= "" and comment_id == c.id
+      -- Items exported by earlier versions have no stored comment ID.
+      local legacy_match = comment_id == "" and
+        math.abs(position - target_position) <= COMMENT_POSITION_EPSILON and
+        (notes == c.text or notes == "")
+
+      if id_match or legacy_match then
+        table.insert(item_matches, item)
+      end
+    end
+  end
+
+  local change_count = #marker_matches + #item_matches
+  if change_count == 0 then return 0 end
+
+  reaper.Undo_BeginBlock2(0)
+  reaper.PreventUIRefresh(1)
+
+  for _, marker in ipairs(marker_matches) do
+    reaper.SetProjectMarker3(
+      0, marker.id, false, marker.position, marker.region_end,
+      marker.name, export_color
+    )
+  end
+
+  for _, item in ipairs(item_matches) do
+    reaper.SetMediaItemInfo_Value(item, "I_CUSTOMCOLOR", export_color)
+  end
+
+  reaper.PreventUIRefresh(-1)
+  reaper.Undo_EndBlock2(
+    0,
+    completed and "Mark Frame.io comment completed" or
+      "Mark Frame.io comment incomplete",
+    -1
+  )
+  reaper.UpdateArrange()
+  return change_count
 end
 
 local function makeCommentItemKey(position, notes)
@@ -1833,6 +1928,8 @@ local function exportCommentsToEmptyItems(info)
     tc_to_sec(STATE.manual_offset_str) or STATE.tc_offset
   if not offset then offset = 0 end
 
+  local incomplete_color = u32ToNativeMarkerColor(COLORS.marker)
+  local completed_color = u32ToNativeMarkerColor(COLORS.completed)
   local eligible = {}
   local skipped_outside = 0
   for _, c in ipairs(STATE.comments) do
@@ -1843,6 +1940,8 @@ local function exportCommentsToEmptyItems(info)
       table.insert(eligible, {
         position = math.max(info.pos, math.min(info.end_, position)),
         notes = include_text and c.text or "",
+        comment_id = c.id,
+        color = isCommentCompleted(c) and completed_color or incomplete_color,
       })
     end
   end
@@ -1878,6 +1977,8 @@ local function exportCommentsToEmptyItems(info)
         position = entry.position,
         length = length,
         notes = entry.notes,
+        comment_id = entry.comment_id,
+        color = entry.color,
       })
       existing[key] = true
     end
@@ -1896,6 +1997,12 @@ local function exportCommentsToEmptyItems(info)
         reaper.SetMediaItemInfo_Value(item, "D_LENGTH", entry.length)
         reaper.GetSetMediaItemInfo_String(
           item, "P_NOTES", entry.notes, true
+        )
+        reaper.GetSetMediaItemInfo_String(
+          item, "P_EXT:" .. COMMENT_ITEM_ID_TAG, entry.comment_id, true
+        )
+        reaper.SetMediaItemInfo_Value(
+          item, "I_CUSTOMCOLOR", entry.color
         )
         created = created + 1
       end
@@ -2080,7 +2187,7 @@ local function draw_comment_list_window()
       end
 
       if not compact_header then imgui.SameLine(ctx) end
-      imgui.Text(ctx, "Cursor: " .. sec_to_tc(get_current_time()))
+      imgui.Text(ctx, "Cursor: " .. project_sec_to_tc(get_current_time()))
 
       imgui.Text(ctx, "Search")
       imgui.SameLine(ctx)
@@ -2342,7 +2449,7 @@ local function loop()
   elseif detectProjectFrameRate() and #STATE.current_file > 0 then
     parse_file(STATE.current_file)
   end
-  
+
   local info = nil
   if STATE.locked_item then
     info = get_item_info_from_ptr(STATE.locked_item)
@@ -2381,7 +2488,7 @@ local function loop()
 
   if visible then
     STATE.last_width = imgui.GetWindowWidth(ctx)
-    
+
     -- Keyboard shortcuts (only when main window is focused, not typing in inputs)
     if imgui.IsWindowFocused(ctx, imgui.FocusedFlags_RootAndChildWindows) then
       handle_keyboard(info)
@@ -2471,8 +2578,8 @@ local function loop()
       imgui.Text(ctx, STATE.item_info.name .. "  |  Length: " .. sec_to_tc(STATE.item_info.len))
       if imgui.IsItemHovered(ctx) then
         set_tooltip_wrapped(
-          "Start: " .. sec_to_tc(STATE.item_info.pos) ..
-          "\nEnd: " .. sec_to_tc(STATE.item_info.end_),
+          "Start: " .. project_sec_to_tc(STATE.item_info.pos) ..
+          "\nEnd: " .. project_sec_to_tc(STATE.item_info.end_),
           "locked_item_info"
         )
       end
@@ -2595,7 +2702,7 @@ local function loop()
         )
       end
       imgui.SameLine(ctx)
-      imgui.Text(ctx, "Cursor: " .. sec_to_tc(get_current_time()))
+      imgui.Text(ctx, "Cursor: " .. project_sec_to_tc(get_current_time()))
     end
 
     imgui.End(ctx)
