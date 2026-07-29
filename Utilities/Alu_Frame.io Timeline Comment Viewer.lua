@@ -1,11 +1,11 @@
 --[[
 @description Frame.io Timeline Comment Viewer
-@version 2.9.1
+@version 2.11.7
 @author Alu
 @about
   Reads Frame.io exported .txt comment files and displays a visual timeline
   with markers synced to a locked video item in REAPER's arrange view.
-  Requires ReaImGui (v0.9+).
+  Requires the ReaImGui extension (v0.9+).
 --]]
 
 -- =====================================================================
@@ -59,6 +59,49 @@ imgui.SetConfigVar(
   ctx, imgui.ConfigVar_Flags,
   config_flags | imgui.ConfigFlags_DockingEnable
 )
+
+-- =====================================================================
+-- GLOBAL UI / FONT SCALING
+-- =====================================================================
+local UI_BASE_FONT_SIZE = 13
+local UI_FONT_MIN = 10
+local UI_FONT_MAX = 24
+local ui_font_size = UI_BASE_FONT_SIZE
+local show_settings_window = false
+local UI_FONTS = {}
+
+for size = UI_FONT_MIN, UI_FONT_MAX do
+  local font = imgui.CreateFont("sans-serif", size)
+  imgui.Attach(ctx, font)
+  UI_FONTS[size] = font
+end
+
+local function uiScale()
+  return ui_font_size / UI_BASE_FONT_SIZE
+end
+
+local function uiPx(value)
+  return math.max(1, math.floor(value * uiScale() + 0.5))
+end
+
+local function pushUIScale()
+  local font = UI_FONTS[ui_font_size]
+  if font then imgui.PushFont(ctx, font) end
+
+  local scale = uiScale()
+  imgui.PushStyleVar(ctx, imgui.StyleVar_WindowPadding, 8 * scale, 8 * scale)
+  imgui.PushStyleVar(ctx, imgui.StyleVar_FramePadding, 4 * scale, 3 * scale)
+  imgui.PushStyleVar(ctx, imgui.StyleVar_ItemSpacing, 8 * scale, 4 * scale)
+  imgui.PushStyleVar(ctx, imgui.StyleVar_ItemInnerSpacing, 4 * scale, 4 * scale)
+  imgui.PushStyleVar(ctx, imgui.StyleVar_ScrollbarSize, 14 * scale)
+  imgui.PushStyleVar(ctx, imgui.StyleVar_GrabMinSize, 10 * scale)
+  return font ~= nil
+end
+
+local function popUIScale(font_was_pushed)
+  imgui.PopStyleVar(ctx, 6)
+  if font_was_pushed then imgui.PopFont(ctx) end
+end
 
 -- =====================================================================
 -- 2. COLOR SYSTEM
@@ -305,7 +348,22 @@ end
 -- Picker lifecycle
 -- ---------------------------------------------------------------------
 
+local cancelColorPicker
+
 local function openColorPicker(key)
+  -- Clicking the already selected swatch toggles the picker closed. Treat
+  -- this like Cancel so an unconfirmed live preview is not committed.
+  if show_color_picker_popup and picker_sel_key == key then
+    cancelColorPicker()
+    return
+  end
+
+  -- Switching directly to another swatch safely restores the previous edit
+  -- before starting a new one.
+  if show_color_picker_popup and picker_sel_key then
+    cancelColorPicker()
+  end
+
   local color = normalizeColor(COLORS[key])
   if not color then return end
 
@@ -318,7 +376,7 @@ local function openColorPicker(key)
   show_color_picker_popup = true
 end
 
-local function cancelColorPicker()
+cancelColorPicker = function()
   if picker_sel_key and picker_original_color then
     COLORS[picker_sel_key] = picker_original_color
     editor_hex_values[picker_sel_key] = U32ToHex(picker_original_color)
@@ -418,14 +476,27 @@ end
 local function draw_color_editor_window()
   if not show_color_editor then return end
 
+  local scale = uiScale()
+  local swatch_size = uiPx(EDITOR_SWATCH_SIZE)
   if not color_editor_rect.applied and color_editor_rect.w > 0 then
     imgui.SetNextWindowPos(ctx, color_editor_rect.x, color_editor_rect.y, imgui.Cond_Always)
     color_editor_rect.applied = true
   end
-  imgui.SetNextWindowSize(ctx, 235, 421, imgui.Cond_Always)
+  -- A small scaled fit allowance prevents accumulated row/font rounding from
+  -- triggering scrollbars while keeping the editor compact.
+  imgui.SetNextWindowSize(
+    ctx,
+    235 * scale + uiPx(8),
+    421 * scale + uiPx(12),
+    imgui.Cond_Always
+  )
+  local font_pushed = pushUIScale()
   local vis, open = imgui.Begin(
     ctx, "Color Editor", true,
-    imgui.WindowFlags_NoResize + imgui.WindowFlags_MenuBar
+    imgui.WindowFlags_NoResize +
+    imgui.WindowFlags_NoScrollbar +
+    imgui.WindowFlags_NoScrollWithMouse +
+    imgui.WindowFlags_MenuBar
   )
 
   if vis then
@@ -445,7 +516,7 @@ local function draw_color_editor_window()
     end
 
     if imgui.BeginMenuBar(ctx) then
-      if imgui.BeginMenu(ctx, "Colors") then
+      if imgui.BeginMenu(ctx, "Options") then
         if imgui.MenuItem(ctx, "Reset All to Defaults") then
           resetColors()
         end
@@ -471,17 +542,17 @@ local function draw_color_editor_window()
       table.concat(preset_names, "\0") .. "\0"
     )
     if preset_changed then preset_sel_idx = new_preset_idx end
-    imgui.Dummy(ctx, 0, 4)
+    imgui.Dummy(ctx, 0, uiPx(4))
 
     local dl = imgui.GetWindowDrawList(ctx)
     local table_flags = imgui.TableFlags_SizingFixedFit +
       imgui.TableFlags_RowBg + imgui.TableFlags_BordersInnerH
     if imgui.BeginTable(ctx, "##color_list", 3, table_flags) then
       imgui.TableSetupColumn(
-        ctx, "Color", imgui.TableColumnFlags_WidthFixed, EDITOR_SWATCH_SIZE + 8
+        ctx, "Color", imgui.TableColumnFlags_WidthFixed, swatch_size + uiPx(8)
       )
       imgui.TableSetupColumn(
-        ctx, "Hex", imgui.TableColumnFlags_WidthFixed, 94
+        ctx, "Hex", imgui.TableColumnFlags_WidthFixed, uiPx(94)
       )
       imgui.TableSetupColumn(
         ctx, "Element", imgui.TableColumnFlags_WidthStretch
@@ -493,27 +564,27 @@ local function draw_color_editor_window()
           editor_hex_values[preset.key] = U32ToHex(color)
         end
 
-        imgui.TableNextRow(ctx, 0, EDITOR_SWATCH_SIZE + 4)
+        imgui.TableNextRow(ctx, 0, swatch_size + uiPx(4))
         imgui.TableSetColumnIndex(ctx, 0)
         imgui.PushID(ctx, preset.key)
 
         local swatch_x, swatch_y = imgui.GetCursorScreenPos(ctx)
         drawCheckerboard(
           dl, swatch_x, swatch_y,
-          EDITOR_SWATCH_SIZE, EDITOR_SWATCH_SIZE, 4
+          swatch_size, swatch_size, uiPx(4)
         )
         imgui.DrawList_AddRectFilled(
           dl, swatch_x, swatch_y,
-          swatch_x + EDITOR_SWATCH_SIZE, swatch_y + EDITOR_SWATCH_SIZE,
-          color, 2
+          swatch_x + swatch_size, swatch_y + swatch_size,
+          color, uiPx(2)
         )
         imgui.DrawList_AddRect(
           dl, swatch_x, swatch_y,
-          swatch_x + EDITOR_SWATCH_SIZE, swatch_y + EDITOR_SWATCH_SIZE,
-          0xFFFFFFFF, 2
+          swatch_x + swatch_size, swatch_y + swatch_size,
+          0xFFFFFFFF, uiPx(2)
         )
         imgui.InvisibleButton(
-          ctx, "##swatch", EDITOR_SWATCH_SIZE, EDITOR_SWATCH_SIZE
+          ctx, "##swatch", swatch_size, swatch_size
         )
 
         if imgui.IsItemClicked(ctx, 0) then
@@ -524,31 +595,32 @@ local function draw_color_editor_window()
         end
         if imgui.IsItemHovered(ctx) then
           set_tooltip_wrapped(
-            "Left-click: edit color\nRight-click: restore default",
+            "Left-click: edit color / close picker\n" ..
+            "Right-click: restore default",
             "color_swatch_" .. preset.key
           )
         end
 
         if picker_sel_key == preset.key then
           imgui.DrawList_AddRect(
-            dl, swatch_x - 2, swatch_y - 2,
-            swatch_x + EDITOR_SWATCH_SIZE + 2,
-            swatch_y + EDITOR_SWATCH_SIZE + 2,
-            0xFFFFFFFF, 2, nil, 2
+            dl, swatch_x - uiPx(2), swatch_y - uiPx(2),
+            swatch_x + swatch_size + uiPx(2),
+            swatch_y + swatch_size + uiPx(2),
+            0xFFFFFFFF, uiPx(2), nil, uiPx(2)
           )
         end
 
         imgui.TableSetColumnIndex(ctx, 1)
         imgui.AlignTextToFramePadding(ctx)
         imgui.Text(ctx, "#")
-        imgui.SameLine(ctx, 0, 2)
-        local hex_field_w = 68
+        imgui.SameLine(ctx, 0, uiPx(2))
+        local hex_field_w = uiPx(68)
         local hex_text_w = imgui.CalcTextSize(ctx, "FFFFFF")
         local _, frame_padding_y = imgui.GetStyleVar(
           ctx, imgui.StyleVar_FramePadding
         )
         local centered_padding_x = math.max(
-          2, (hex_field_w - hex_text_w) * 0.5
+          uiPx(2), (hex_field_w - hex_text_w) * 0.5
         )
         imgui.PushStyleVar(
           ctx, imgui.StyleVar_FramePadding,
@@ -581,9 +653,9 @@ local function draw_color_editor_window()
       imgui.EndTable(ctx)
     end
 
-    imgui.Dummy(ctx, 0, 8)
+    imgui.Dummy(ctx, 0, uiPx(8))
 
-    local color_button_w = 60
+    local color_button_w = uiPx(60)
     local button_spacing_x = imgui.GetStyleVar(ctx, imgui.StyleVar_ItemSpacing)
     local color_buttons_total = color_button_w * 3 + button_spacing_x * 2
     local color_buttons_avail = imgui.GetContentRegionAvail(ctx)
@@ -615,6 +687,7 @@ local function draw_color_editor_window()
 
     imgui.End(ctx)
   end
+  popUIScale(font_pushed)
 
   if not open then
     show_color_editor = false
@@ -628,9 +701,16 @@ end
 local function draw_color_picker_popup()
   if not show_color_picker_popup or not picker_sel_key then return end
 
-  imgui.SetNextWindowPos(ctx, color_editor_rect.x + color_editor_rect.w + 8, color_editor_rect.y, imgui.Cond_Appearing)
-  imgui.SetNextWindowSize(ctx, 330, 350, imgui.Cond_FirstUseEver)
-  imgui.SetNextWindowSizeConstraints(ctx, 270, 315, 520, 650)
+  local scale = uiScale()
+  local picker_hue_w = uiPx(PICKER_HUE_W)
+  imgui.SetNextWindowPos(
+    ctx, color_editor_rect.x + color_editor_rect.w + uiPx(8),
+    color_editor_rect.y, imgui.Cond_Appearing
+  )
+  imgui.SetNextWindowSize(ctx, 330 * scale, 350 * scale, imgui.Cond_FirstUseEver)
+  imgui.SetNextWindowSizeConstraints(
+    ctx, 270 * scale, 315 * scale, 520 * scale, 650 * scale
+  )
 
   local popup_flags = imgui.WindowFlags_NoCollapse
 
@@ -642,6 +722,7 @@ local function draw_color_picker_popup()
     end
   end
 
+  local font_pushed = pushUIScale()
   local vis, open = imgui.Begin(
     ctx, "Edit: " .. preset_label .. "###FrameioColorPicker", true, popup_flags
   )
@@ -651,12 +732,14 @@ local function draw_color_picker_popup()
       if imgui.IsKeyPressed(ctx, imgui.Key_Enter) or imgui.IsKeyPressed(ctx, imgui.Key_KeypadEnter) then
         acceptColorPicker()
         imgui.End(ctx)
+        popUIScale(font_pushed)
         return
       end
 
       if imgui.IsKeyPressed(ctx, imgui.Key_Escape) then
         cancelColorPicker()
         imgui.End(ctx)
+        popUIScale(font_pushed)
         return
       end
     end
@@ -664,16 +747,16 @@ local function draw_color_picker_popup()
     local dl = imgui.GetWindowDrawList(ctx)
     local avail_w, avail_h = imgui.GetContentRegionAvail(ctx)
     local picker_sv_size = math.floor(math.min(
-      avail_w - PICKER_HUE_W - 12,
-      avail_h - 105
+      avail_w - picker_hue_w - uiPx(12),
+      avail_h - uiPx(105)
     ))
-    picker_sv_size = math.max(120, math.min(360, picker_sv_size))
+    picker_sv_size = math.max(uiPx(120), math.min(uiPx(360), picker_sv_size))
     local scr_x, scr_y = imgui.GetCursorScreenPos(ctx)
     local sv_x, sv_y = scr_x, scr_y
-    local hue_x = scr_x + picker_sv_size + 12
+    local hue_x = scr_x + picker_sv_size + uiPx(12)
 
     drawSVSquare(dl, sv_x, sv_y, picker_sv_size, picker_h)
-    drawHueGradient(dl, hue_x, sv_y, PICKER_HUE_W, picker_sv_size)
+    drawHueGradient(dl, hue_x, sv_y, picker_hue_w, picker_sv_size)
 
     -- SV interaction.
     -- Keep H/S/V as the source of truth while dragging, exactly like the
@@ -699,7 +782,7 @@ local function draw_color_picker_popup()
 
     -- Hue interaction.
     imgui.SetCursorScreenPos(ctx, hue_x, sv_y)
-    imgui.InvisibleButton(ctx, "##hue_picker", PICKER_HUE_W, picker_sv_size)
+    imgui.InvisibleButton(ctx, "##hue_picker", picker_hue_w, picker_sv_size)
 
     if imgui.IsItemActive(ctx) then
       local _, my = imgui.GetMousePos(ctx)
@@ -717,40 +800,52 @@ local function draw_color_picker_popup()
       dl,
       sv_x + picker_s * picker_sv_size,
       sv_y + (1 - picker_v) * picker_sv_size,
-      5,
+      uiPx(5),
       0xFFFFFFFF,
       8,
-      2
+      uiPx(2)
     )
 
     imgui.DrawList_AddLine(
       dl,
-      hue_x - 2,
+      hue_x - uiPx(2),
       sv_y + picker_h * picker_sv_size,
-      hue_x + PICKER_HUE_W + 2,
+      hue_x + picker_hue_w + uiPx(2),
       sv_y + picker_h * picker_sv_size,
       0xFFFFFFFF,
-      2
+      uiPx(2)
     )
 
-    imgui.Dummy(ctx, 0, 8)
+    imgui.Dummy(ctx, 0, uiPx(8))
 
     -- Current color preview over a checkerboard + RGB-only hex input.
     imgui.BeginGroup(ctx)
 
     local preview_col = normalizeColor(COLORS[picker_sel_key]) or 0xFFFFFFFF
     local preview_x, preview_y = imgui.GetCursorScreenPos(ctx)
-    drawCheckerboard(dl, preview_x, preview_y, 28, 28, 5)
-    imgui.DrawList_AddRectFilled(dl, preview_x, preview_y, preview_x + 28, preview_y + 28, preview_col, 2)
-    imgui.DrawList_AddRect(dl, preview_x, preview_y, preview_x + 28, preview_y + 28, 0xFFFFFFFF, 2)
-    imgui.InvisibleButton(ctx, "##preview", 28, 28)
+    local preview_size = uiPx(28)
+    drawCheckerboard(
+      dl, preview_x, preview_y, preview_size, preview_size, uiPx(5)
+    )
+    imgui.DrawList_AddRectFilled(
+      dl, preview_x, preview_y,
+      preview_x + preview_size, preview_y + preview_size,
+      preview_col, uiPx(2)
+    )
+    imgui.DrawList_AddRect(
+      dl, preview_x, preview_y,
+      preview_x + preview_size, preview_y + preview_size,
+      0xFFFFFFFF, uiPx(2)
+    )
+    imgui.InvisibleButton(ctx, "##preview", preview_size, preview_size)
 
-    local preview_controls_y = preview_y + (28 - imgui.GetFrameHeight(ctx)) * 0.5
-    imgui.SetCursorScreenPos(ctx, preview_x + 36, preview_controls_y)
+    local preview_controls_y =
+      preview_y + (preview_size - imgui.GetFrameHeight(ctx)) * 0.5
+    imgui.SetCursorScreenPos(ctx, preview_x + uiPx(36), preview_controls_y)
     imgui.AlignTextToFramePadding(ctx)
     imgui.Text(ctx, "#")
     imgui.SameLine(ctx)
-    imgui.PushItemWidth(ctx, 100)
+    imgui.PushItemWidth(ctx, uiPx(100))
 
     local chg, new_hex = imgui.InputText(
       ctx,
@@ -774,14 +869,14 @@ local function draw_color_picker_popup()
     end
 
     imgui.EndGroup(ctx)
-    imgui.Dummy(ctx, 0, 6)
+    imgui.Dummy(ctx, 0, uiPx(6))
 
     -- Alpha / opacity control. Keep HSV and alpha independent: changing
     -- opacity should never alter the RGB selection in the picker.
     imgui.Text(ctx, "Opacity")
     imgui.SameLine(ctx)
     local opacity_w = imgui.GetContentRegionAvail(ctx)
-    imgui.PushItemWidth(ctx, math.max(120, opacity_w))
+    imgui.PushItemWidth(ctx, math.max(uiPx(120), opacity_w))
     local alpha_changed, opacity_pct = imgui.SliderDouble(
       ctx, "##alpha", picker_a * 100, 0, 100, "%.0f%%"
     )
@@ -791,9 +886,9 @@ local function draw_color_picker_popup()
       updatePickerColor()
     end
 
-    imgui.Dummy(ctx, 0, 4)
+    imgui.Dummy(ctx, 0, uiPx(4))
 
-    local picker_button_w = 80
+    local picker_button_w = uiPx(80)
     local picker_button_spacing = imgui.GetStyleVar(ctx, imgui.StyleVar_ItemSpacing)
     local picker_buttons_total = picker_button_w * 2 + picker_button_spacing
     local picker_buttons_avail = imgui.GetContentRegionAvail(ctx)
@@ -805,6 +900,7 @@ local function draw_color_picker_popup()
     if imgui.Button(ctx, "OK", picker_button_w, 0) then
       acceptColorPicker()
       imgui.End(ctx)
+      popUIScale(font_pushed)
       return
     end
 
@@ -813,11 +909,13 @@ local function draw_color_picker_popup()
     if imgui.Button(ctx, "Cancel", picker_button_w, 0) then
       cancelColorPicker()
       imgui.End(ctx)
+      popUIScale(font_pushed)
       return
     end
 
     imgui.End(ctx)
   end
+  popUIScale(font_pushed)
 
   if not open then
     -- Closing with the window X is equivalent to Cancel.
@@ -832,7 +930,7 @@ local CFG = {
   fps               = 24,
   nominal_fps       = 24,
   drop_frame        = false,
-  timeline_h        = 54,
+  timeline_h        = 54, -- Minimum visualizer height
   hover_dist        = 6,
   playhead_drag_dist = 8,
   playhead_head_h   = 10,
@@ -888,6 +986,13 @@ local STATE = {
 }
 
 local function loadWorkflowSettings()
+  ui_font_size = math.max(
+    UI_FONT_MIN,
+    math.min(
+      UI_FONT_MAX,
+      math.floor(loadNumberSetting("ui_font_size", UI_BASE_FONT_SIZE) + 0.5)
+    )
+  )
   STATE.follow_current_comment = loadBoolSetting("follow_current_comment", false)
   STATE.use_manual_offset = loadBoolSetting("use_manual_offset", false)
   STATE.manual_offset_str = reaper.GetExtState(SETTINGS_SECTION, "manual_offset_str")
@@ -1074,9 +1179,12 @@ updateArrangeMarkerForComment = function(c, completed)
   for index = 0, marker_count + region_count - 1 do
     local ok, is_region, position, region_end, name, marker_id =
       reaper.EnumProjectMarkers3(0, index)
+    -- Text-free exports create unnamed markers. Match either the original
+    -- comment text or an empty marker name so completion color changes keep
+    -- working in both export modes.
     if ok > 0 and not is_region and
       math.abs(position - target_position) <= 0.0005 and
-      name == target_name then
+      (name == target_name or name == "") then
       table.insert(matches, {
         id = marker_id,
         position = position,
@@ -1409,15 +1517,19 @@ end
 -- =====================================================================
 -- 10. TIMELINE DRAWING
 -- =====================================================================
-local function draw_timeline(info)
+local function draw_timeline(info, requested_height)
   local dl = imgui.GetWindowDrawList(ctx)
   local cx, cy = imgui.GetCursorScreenPos(ctx)
   local aw, _  = imgui.GetContentRegionAvail(ctx)
-  local w, h   = aw, CFG.timeline_h
+  local minimum_h = uiPx(CFG.timeline_h)
+  local w = aw
+  local h = math.max(minimum_h, requested_height or minimum_h)
   local x2, y2 = cx + w, cy + h
 
-  imgui.DrawList_AddRectFilled(dl, cx, cy, x2, y2, COLORS.bg, 4)
-  imgui.DrawList_AddRect(dl, cx, cy, x2, y2, COLORS.border, 4, 0, 1)
+  imgui.DrawList_AddRectFilled(dl, cx, cy, x2, y2, COLORS.bg, uiPx(4))
+  imgui.DrawList_AddRect(
+    dl, cx, cy, x2, y2, COLORS.border, uiPx(4), 0, uiPx(1)
+  )
 
   local offset = STATE.use_manual_offset and tc_to_sec(STATE.manual_offset_str) or STATE.tc_offset
   if not offset then offset = 0 end
@@ -1443,7 +1555,9 @@ local function draw_timeline(info)
   end
 
   -- Ticks
-  local max_labels = math.max(2, math.floor(w / CFG.px_per_label))
+  local max_labels = math.max(
+    2, math.floor(w / uiPx(CFG.px_per_label))
+  )
   local step = get_nice_step(visible_len, max_labels)
   local start_tick = math.floor(view_start / step) * step
   local t = start_tick
@@ -1451,14 +1565,16 @@ local function draw_timeline(info)
     if t >= view_start - 0.001 and t <= view_end + 0.001 then
       local x = time_to_x(t)
       local major = (math.abs(t % (step * 2)) < 0.001) or step < 2
-      local th = major and 10 or 5
-      imgui.DrawList_AddLine(dl, x, y2 - th, x, y2, COLORS.tick, 1)
+      local th = major and uiPx(10) or uiPx(5)
+      imgui.DrawList_AddLine(
+        dl, x, y2 - th, x, y2, COLORS.tick, uiPx(1)
+      )
       if major then
         local lbl = sec_to_tc(t)
         local tw = imgui.CalcTextSize(ctx, lbl)
         local lx = x - tw * 0.5
-        if lx > cx + 2 and lx + tw < x2 - 2 then
-          imgui.DrawList_AddText(dl, lx, y2 + 4, COLORS.text, lbl)
+        if lx > cx + uiPx(2) and lx + tw < x2 - uiPx(2) then
+          imgui.DrawList_AddText(dl, lx, y2 + uiPx(4), COLORS.text, lbl)
         end
       end
     end
@@ -1467,11 +1583,16 @@ local function draw_timeline(info)
 
   -- Edge labels
   if view_start < 0.5 then
-    imgui.DrawList_AddText(dl, cx + 2, y2 + 4, COLORS.text, sec_to_tc(0))
+    imgui.DrawList_AddText(
+      dl, cx + uiPx(2), y2 + uiPx(4), COLORS.text, sec_to_tc(0)
+    )
   end
   if view_end > info.len - 0.5 then
     local tw = imgui.CalcTextSize(ctx, sec_to_tc(info.len))
-    imgui.DrawList_AddText(dl, x2 - tw - 2, y2 + 4, COLORS.text, sec_to_tc(info.len))
+    imgui.DrawList_AddText(
+      dl, x2 - tw - uiPx(2), y2 + uiPx(4),
+      COLORS.text, sec_to_tc(info.len)
+    )
   end
 
   -- Markers
@@ -1479,7 +1600,8 @@ local function draw_timeline(info)
     local rel = c.t - offset
     if rel >= view_start - 0.001 and rel <= view_end + 0.001 then
       local x = time_to_x(rel)
-      local is_hov = math.abs(mx - x) < CFG.hover_dist and my >= cy and my <= y2
+      local is_hov = math.abs(mx - x) < uiPx(CFG.hover_dist) and
+        my >= cy and my <= y2
       local is_current = c.id == STATE.active_comment_id
       local is_completed = isCommentCompleted(c)
       local col
@@ -1493,9 +1615,9 @@ local function draw_timeline(info)
         col = is_hov and COLORS.marker_hov or COLORS.marker
       end
       local emphasized = is_hov or is_current
-      local thick = emphasized and 2 or 1
-      local y_top = emphasized and cy - 2 or cy + 2
-      local y_bot = emphasized and y2 + 2 or y2 - 2
+      local thick = emphasized and uiPx(2) or uiPx(1)
+      local y_top = emphasized and cy - uiPx(2) or cy + uiPx(2)
+      local y_bot = emphasized and y2 + uiPx(2) or y2 - uiPx(2)
       imgui.DrawList_AddLine(dl, x, y_top, x, y_bot, col, thick)
       if is_hov then
         hovered_comment = c
@@ -1522,11 +1644,19 @@ local function draw_timeline(info)
   if rel_time >= view_start and rel_time <= view_end then
     local x = time_to_x(rel_time)
     playhead_x = x
-    imgui.DrawList_AddLine(dl, x, cy + 2, x, y2, COLORS.playhead, 2)
-    local tip_y = cy + 2
-    local base_y = cy - 9
-    imgui.DrawList_AddTriangle(dl, x, tip_y + 1, x - 7, base_y, x + 7, base_y, 0xFF000000, 1)
-    imgui.DrawList_AddTriangleFilled(dl, x, tip_y, x - 6, base_y, x + 6, base_y, COLORS.playhead)
+    imgui.DrawList_AddLine(
+      dl, x, cy + uiPx(2), x, y2, COLORS.playhead, uiPx(2)
+    )
+    local tip_y = cy + uiPx(2)
+    local base_y = cy - uiPx(9)
+    imgui.DrawList_AddTriangle(
+      dl, x, tip_y + uiPx(1), x - uiPx(7), base_y,
+      x + uiPx(7), base_y, 0xFF000000, uiPx(1)
+    )
+    imgui.DrawList_AddTriangleFilled(
+      dl, x, tip_y, x - uiPx(6), base_y,
+      x + uiPx(6), base_y, COLORS.playhead
+    )
   elseif not STATE.drag_mode then
     -- Auto-scroll to keep playhead centered during playback
     scroll_timeline_to_time(rel_time, info)
@@ -1535,13 +1665,14 @@ local function draw_timeline(info)
   -- Interaction
   -- Extend the interaction area above the timeline so the playhead triangle
   -- is draggable as well as its vertical stem.
-  imgui.SetCursorScreenPos(ctx, cx, cy - CFG.playhead_head_h)
-  imgui.InvisibleButton(ctx, "##tl", w, h + CFG.playhead_head_h)
+  local playhead_head_h = uiPx(CFG.playhead_head_h)
+  imgui.SetCursorScreenPos(ctx, cx, cy - playhead_head_h)
+  imgui.InvisibleButton(ctx, "##tl", w, h + playhead_head_h)
 
   local is_hovered = imgui.IsItemHovered(ctx)
   local is_active = imgui.IsItemActive(ctx)
   local playhead_hovered = is_hovered and playhead_x and
-    math.abs(mx - playhead_x) <= CFG.playhead_drag_dist
+    math.abs(mx - playhead_x) <= uiPx(CFG.playhead_drag_dist)
   if playhead_hovered and not hovered_comment then
     set_tooltip_wrapped(
       "Drag the playhead to scrub the REAPER timeline",
@@ -1623,7 +1754,7 @@ local function draw_timeline(info)
     STATE.drag_start_mx = nil
   end
 
-  imgui.SetCursorScreenPos(ctx, cx, y2 + 20)
+  imgui.SetCursorScreenPos(ctx, cx, y2 + uiPx(20))
 end
 
 -- =====================================================================
@@ -1677,8 +1808,26 @@ local function makeCommentItemKey(position, notes)
     "\0" .. tostring(notes or "")
 end
 
+local function askWhetherToIncludeCommentText(export_target)
+  local result = reaper.ShowMessageBox(
+    "Include the Frame.io comment text in the exported " ..
+      export_target .. "?\n\n" ..
+      "Yes: export with comment text\n" ..
+      "No: export without text\n" ..
+      "Cancel: do not export",
+    "Frame.io Export", 3
+  )
+
+  if result == 6 then return true end
+  if result == 7 then return false end
+  return nil
+end
+
 local function exportCommentsToEmptyItems(info)
   if not info or #STATE.comments == 0 then return end
+  local include_text =
+    askWhetherToIncludeCommentText("empty items (as item notes)")
+  if include_text == nil then return end
 
   local offset = STATE.use_manual_offset and
     tc_to_sec(STATE.manual_offset_str) or STATE.tc_offset
@@ -1693,7 +1842,7 @@ local function exportCommentsToEmptyItems(info)
     else
       table.insert(eligible, {
         position = math.max(info.pos, math.min(info.end_, position)),
-        notes = c.text,
+        notes = include_text and c.text or "",
       })
     end
   end
@@ -1770,6 +1919,9 @@ end
 
 local function exportCommentsToProjectMarkers(info)
   if not info or #STATE.comments == 0 then return end
+  local include_text =
+    askWhetherToIncludeCommentText("markers (as marker names)")
+  if include_text == nil then return end
 
   local offset = STATE.use_manual_offset and
     tc_to_sec(STATE.manual_offset_str) or STATE.tc_offset
@@ -1795,7 +1947,7 @@ local function exportCommentsToProjectMarkers(info)
   local skipped_outside = 0
   for _, c in ipairs(STATE.comments) do
     local position = info.pos + (c.t - offset)
-    local name = c.text:gsub("[\r\n]+", " ")
+    local name = include_text and c.text:gsub("[\r\n]+", " ") or ""
     local key = tostring(math.floor(position * 1000 + 0.5)) ..
       "\0" .. name
 
@@ -1851,7 +2003,9 @@ local function draw_comment_list_window()
       imgui.SetNextWindowSize(ctx, rect.w, rect.h, imgui.Cond_Always)
       rect.applied = true
     else
-      imgui.SetNextWindowSize(ctx, 480, 520, imgui.Cond_FirstUseEver)
+      imgui.SetNextWindowSize(
+        ctx, 480 * uiScale(), 520 * uiScale(), imgui.Cond_FirstUseEver
+      )
     end
     STATE.comment_win_first_open = false
   end
@@ -1862,6 +2016,7 @@ local function draw_comment_list_window()
     "Comment List (%d/%d completed)###FrameioCommentList",
     completed_count, total_count
   )
+  local font_pushed = pushUIScale()
   local visible, open = imgui.Begin(ctx, title, true, flags)
 
   if visible then
@@ -1896,7 +2051,7 @@ local function draw_comment_list_window()
       -- Navigation controls stay on one row when there is room and reflow
       -- vertically in narrower windows.
       local header_w = select(1, imgui.GetContentRegionAvail(ctx))
-      local compact_header = header_w < 700
+      local compact_header = header_w < uiPx(700)
 
       if imgui.Button(ctx, "< Prev Comment") then
         go_to_prev_comment(info)
@@ -1930,7 +2085,7 @@ local function draw_comment_list_window()
       imgui.Text(ctx, "Search")
       imgui.SameLine(ctx)
       local search_w = imgui.GetContentRegionAvail(ctx)
-      imgui.PushItemWidth(ctx, math.max(100, search_w))
+      imgui.PushItemWidth(ctx, math.max(uiPx(100), search_w))
       local search_changed, search_value = imgui.InputText(
         ctx, "##comment_search", STATE.comment_search
       )
@@ -1945,11 +2100,12 @@ local function draw_comment_list_window()
       )
       local filter_row_w = select(1, imgui.GetContentRegionAvail(ctx))
       local progress_w = imgui.CalcTextSize(ctx, progress_text)
-      local filter_and_progress_fit = filter_row_w >= 225 + progress_w
+      local filter_and_progress_fit =
+        filter_row_w >= uiPx(225) + progress_w
 
       imgui.Text(ctx, "Show")
       imgui.SameLine(ctx)
-      imgui.PushItemWidth(ctx, 130)
+      imgui.PushItemWidth(ctx, uiPx(130))
       local filter_changed, filter_value = imgui.Combo(
         ctx, "##comment_filter", STATE.comment_filter,
         "All\0Incomplete\0Completed\0Current\0Nearby (10s)\0"
@@ -1999,7 +2155,7 @@ local function draw_comment_list_window()
       -- accidentally used the remaining width as the child height, so making
       -- this window narrow also made the list short and clipped wrapped rows.
       local _, remaining_h = imgui.GetContentRegionAvail(ctx)
-      local list_h = math.max(120, remaining_h - 4)
+      local list_h = math.max(uiPx(120), remaining_h - uiPx(4))
       if imgui.BeginChild(ctx, "##clist", 0, list_h, 0) then
         if #display_comments == 0 then
           imgui.TextDisabled(ctx, "No comments match the current search and filter.")
@@ -2034,7 +2190,7 @@ local function draw_comment_list_window()
           imgui.SameLine(ctx)
 
           local avail_w = imgui.GetContentRegionAvail(ctx)
-          local wrap_x = imgui.GetCursorPosX(ctx) + avail_w - 10
+          local wrap_x = imgui.GetCursorPosX(ctx) + avail_w - uiPx(10)
           imgui.PushTextWrapPos(ctx, wrap_x)
 
           local label = string.format("%s  |  %s", c.tc, c.text)
@@ -2061,18 +2217,117 @@ local function draw_comment_list_window()
           if is_completed or is_active then imgui.PopStyleColor(ctx) end
           imgui.PopID(ctx)
 
-          imgui.Dummy(ctx, 0, 2)
+          imgui.Dummy(ctx, 0, uiPx(2))
         end
         imgui.EndChild(ctx)
       end
     end
     imgui.End(ctx)
   end
+  popUIScale(font_pushed)
 
   if not open then
     STATE.show_comment_window = false
     saveSetting("show_comment_window", 0)
   end
+end
+
+-- =====================================================================
+-- SETTINGS WINDOW
+-- =====================================================================
+local function draw_settings_window()
+  if not show_settings_window then return end
+
+  -- Always recompute this compact window from the current font size so it
+  -- stays fitted immediately after choosing a different value.
+  imgui.SetNextWindowSize(
+    ctx,
+    175 * uiScale() + uiPx(8),
+    100 * uiScale() + uiPx(8),
+    imgui.Cond_Always
+  )
+  local font_pushed = pushUIScale()
+  local visible, open = imgui.Begin(
+    ctx, "Settings###FrameioTimelineSettings", true,
+    imgui.WindowFlags_NoCollapse +
+    imgui.WindowFlags_NoResize +
+    imgui.WindowFlags_NoScrollbar +
+    imgui.WindowFlags_NoScrollWithMouse
+  )
+
+  if visible then
+    if imgui.IsWindowFocused(ctx, imgui.FocusedFlags_RootAndChildWindows) and
+      imgui.IsKeyPressed(ctx, imgui.Key_Escape) then
+      open = false
+    end
+
+    local font_label = "Font size"
+    local font_label_w = imgui.CalcTextSize(ctx, font_label)
+    local font_label_avail_w = select(1, imgui.GetContentRegionAvail(ctx))
+    imgui.SetCursorPosX(
+      ctx,
+      imgui.GetCursorPosX(ctx) +
+      math.max(0, (font_label_avail_w - font_label_w) * 0.5)
+    )
+    imgui.Text(ctx, font_label)
+
+    local font_size_options = {}
+    for size = UI_FONT_MIN, UI_FONT_MAX do
+      table.insert(font_size_options, tostring(size) .. " px")
+    end
+
+    local font_combo_w = uiPx(120)
+    local font_combo_avail_w = select(1, imgui.GetContentRegionAvail(ctx))
+    imgui.SetCursorPosX(
+      ctx,
+      imgui.GetCursorPosX(ctx) +
+      math.max(0, (font_combo_avail_w - font_combo_w) * 0.5)
+    )
+    imgui.PushItemWidth(ctx, font_combo_w)
+    local changed, new_index = imgui.Combo(
+      ctx, "##ui_font_size",
+      ui_font_size - UI_FONT_MIN,
+      table.concat(font_size_options, "\0") .. "\0"
+    )
+    imgui.PopItemWidth(ctx)
+
+    if changed then
+      ui_font_size = math.max(
+        UI_FONT_MIN,
+        math.min(UI_FONT_MAX, new_index + UI_FONT_MIN)
+      )
+      saveSetting("ui_font_size", ui_font_size)
+    end
+
+    local reset_label = "Reset to Default"
+    local reset_text_w = imgui.CalcTextSize(ctx, reset_label)
+    local frame_padding_x = imgui.GetStyleVar(
+      ctx, imgui.StyleVar_FramePadding
+    )
+    local reset_button_w = reset_text_w + frame_padding_x * 2
+    local reset_avail_w = select(1, imgui.GetContentRegionAvail(ctx))
+    imgui.SetCursorPosX(
+      ctx,
+      imgui.GetCursorPosX(ctx) +
+      math.max(0, (reset_avail_w - reset_button_w) * 0.5)
+    )
+
+    if imgui.Button(ctx, reset_label, reset_button_w, 0) then
+      ui_font_size = UI_BASE_FONT_SIZE
+      saveSetting("ui_font_size", ui_font_size)
+    end
+    if imgui.IsItemHovered(ctx) then
+      set_tooltip_wrapped(
+        "Restore the interface font and proportional sizing to 13 px.",
+        "reset_ui_font_size"
+      )
+    end
+
+    imgui.End(ctx)
+  end
+  popUIScale(font_pushed)
+
+  if not open then show_settings_window = false end
 end
 
 -- =====================================================================
@@ -2101,7 +2356,9 @@ local function loop()
   updateActiveComment(info)
 
   if not STATE.has_opened then
-    imgui.SetNextWindowSize(ctx, 720, 240, imgui.Cond_FirstUseEver)
+    imgui.SetNextWindowSize(
+      ctx, 720 * uiScale(), 240 * uiScale(), imgui.Cond_FirstUseEver
+    )
     STATE.has_opened = true
   end
 
@@ -2111,6 +2368,7 @@ local function loop()
   end
 
   local flags = imgui.WindowFlags_MenuBar
+  local main_font_pushed = pushUIScale()
   local visible, open = imgui.Begin(ctx, "Frame.io Timeline Viewer", true, flags)
   local actual_dock_id = imgui.GetWindowDockID(ctx)
   if actual_dock_id ~= STATE.current_dock_id then
@@ -2181,11 +2439,11 @@ local function loop()
         imgui.EndMenu(ctx)
       end
 
-      if imgui.BeginMenu(ctx, "Colors") then
-        if imgui.MenuItem(ctx, "Edit Colors...") then
-          show_color_editor = true
-        end
-        imgui.EndMenu(ctx)
+      if imgui.MenuItem(ctx, "Colors") then
+        show_color_editor = true
+      end
+      if imgui.MenuItem(ctx, "Settings") then
+        show_settings_window = true
       end
       imgui.EndMenuBar(ctx)
     end
@@ -2234,7 +2492,7 @@ local function loop()
       end
       if STATE.use_manual_offset then
         imgui.SameLine(ctx)
-        imgui.PushItemWidth(ctx, 80)
+        imgui.PushItemWidth(ctx, uiPx(80))
         local chg2, newtxt = imgui.InputText(ctx, "##off", STATE.manual_offset_str,
           imgui.InputTextFlags_CharsNoBlank + imgui.InputTextFlags_EnterReturnsTrue)
         imgui.PopItemWidth(ctx)
@@ -2266,9 +2524,27 @@ local function loop()
     else
       local i = STATE.item_info
 
-      imgui.Dummy(ctx, 0, 4)
-      draw_timeline(i)
-      imgui.Dummy(ctx, 0, 2)
+      imgui.Dummy(ctx, 0, uiPx(4))
+
+      -- Keep the existing timeline height as the minimum, then give the
+      -- visualizer all extra vertical space while reserving the navigation
+      -- row below it at its normal fixed size.
+      local _, available_timeline_h = imgui.GetContentRegionAvail(ctx)
+      local _, item_spacing_y = imgui.GetStyleVar(
+        ctx, imgui.StyleVar_ItemSpacing
+      )
+      local fixed_bottom_h =
+        uiPx(20) + -- Timecode labels drawn beneath the timeline
+        uiPx(2) +  -- Small spacer below the visualizer
+        item_spacing_y +
+        imgui.GetFrameHeight(ctx) +
+        item_spacing_y
+      local expanded_timeline_h = math.max(
+        uiPx(CFG.timeline_h), available_timeline_h - fixed_bottom_h
+      )
+
+      draw_timeline(i, expanded_timeline_h)
+      imgui.Dummy(ctx, 0, uiPx(2))
 
       -- Compact navigation arrows
       if imgui.Button(ctx, "<") then
@@ -2324,6 +2600,7 @@ local function loop()
 
     imgui.End(ctx)
   end
+  popUIScale(main_font_pushed)
 
   if not open then
     STATE.main_open = false
@@ -2340,10 +2617,18 @@ local function loop()
   draw_color_editor_window()
 
   -- =====================================================================
+  -- SETTINGS WINDOW
+  -- =====================================================================
+  draw_settings_window()
+
+  -- =====================================================================
   -- PRESET SAVE POPUP
   -- =====================================================================
   if show_preset_save_popup then
-    imgui.SetNextWindowSize(ctx, 280, 100, imgui.Cond_Always)
+    imgui.SetNextWindowSize(
+      ctx, 280 * uiScale(), 100 * uiScale(), imgui.Cond_Always
+    )
+    local preset_font_pushed = pushUIScale()
     local vis2, open2 = imgui.Begin(ctx, "Save Preset", true, imgui.WindowFlags_NoCollapse + imgui.WindowFlags_NoResize)
     if vis2 then
       if imgui.IsWindowFocused(ctx, imgui.FocusedFlags_RootAndChildWindows) then
@@ -2361,7 +2646,7 @@ local function loop()
       imgui.Text(ctx, "Preset name:")
       local chg, new_name = imgui.InputText(ctx, "##presetname", preset_input_name, imgui.InputTextFlags_EnterReturnsTrue)
       if chg then preset_input_name = new_name end
-      if imgui.Button(ctx, "Save", 60, 0) then
+      if imgui.Button(ctx, "Save", uiPx(60), 0) then
         local idx = preset_sel_idx + 1
         if idx >= 1 and idx <= MAX_PRESETS then
           saveColorPreset(idx, preset_input_name)
@@ -2369,11 +2654,12 @@ local function loop()
         show_preset_save_popup = false
       end
       imgui.SameLine(ctx)
-      if imgui.Button(ctx, "Cancel", 60, 0) then
+      if imgui.Button(ctx, "Cancel", uiPx(60), 0) then
         show_preset_save_popup = false
       end
       imgui.End(ctx)
     end
+    popUIScale(preset_font_pushed)
     if not open2 then
       show_preset_save_popup = false
     end
