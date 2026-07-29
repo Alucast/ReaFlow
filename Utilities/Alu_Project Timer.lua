@@ -1,15 +1,17 @@
--- @author Alejandro (Alu) 
+-- @description Alu Project Timer
+-- @author Alejandro (Alu)
+-- @version 2.3
+-- @about
+--   Project-aware work timer with AFK detection and a transport timer.
+--   This version safely follows REAPER project-tab changes.
 
 local reaper = reaper
 
--- Configuration object for easy customization
 local CONFIG = {
-    PROJECT_ID = 0,
     SECTION_NAME = "AI_ProjectTimer",
     FONT_FAMILY = "sans-serif",
     FONT_SIZE = 13,
     AUTO_SAVE_INTERVAL = 5,
-    DISPLAY_UPDATE_INTERVAL = 0.25,
     DEFAULT_AFK_THRESHOLD = 1,
     MAX_AFK_THRESHOLD = 60,
     ACTIVITY_CHECK_INTERVAL = 0.5,
@@ -18,26 +20,36 @@ local CONFIG = {
     DEFAULT_INITIAL_PAUSED = true,
     DEFAULT_TRANSPORT_MODE_ACTIVE = false,
     MIN_FONT_SIZE = 8,
-    MAX_FONT_SIZE = 24
+    MAX_FONT_SIZE = 24,
+    MAX_FRAME_DELTA = 2
 }
 
--- Error checking for ReaImGui
 if not reaper.ImGui_GetBuiltinPath then
-    reaper.MB("ReaImGui extension is required", "Missing Dependency", 0)
+    reaper.MB("ReaImGui extension is required.", "Missing Dependency", 0)
     return
 end
 
--- Initialize ImGui
-package.path = reaper.ImGui_GetBuiltinPath() .. '/?.lua'
-local ImGui = require 'imgui' '0.9.3'
-local ctx = ImGui.CreateContext('Project Time Counter')
+package.path = reaper.ImGui_GetBuiltinPath() .. "/?.lua;" .. package.path
 
--- Window flags
-local WindowFlags = ImGui.WindowFlags_AlwaysAutoResize | 
-                   ImGui.WindowFlags_NoSavedSettings | 
-                   ImGui.WindowFlags_NoTitleBar
+local imgui_ok, ImGui = pcall(function()
+    return require("imgui")("0.9.3")
+end)
 
--- State
+if not imgui_ok then
+    reaper.MB(
+        "Unable to load ReaImGui:\n\n" .. tostring(ImGui),
+        "Project Timer",
+        0
+    )
+    return
+end
+
+local ctx = ImGui.CreateContext("Project Time Counter")
+
+local WindowFlags = ImGui.WindowFlags_AlwaysAutoResize
+    | ImGui.WindowFlags_NoSavedSettings
+    | ImGui.WindowFlags_NoTitleBar
+
 local settings = {
     afk_threshold = CONFIG.DEFAULT_AFK_THRESHOLD,
     afk_enabled = true,
@@ -47,61 +59,89 @@ local settings = {
     format_mode = CONFIG.DEFAULT_FORMAT_MODE,
     time_offset = {weeks = 0, days = 0, hours = 0, minutes = 0},
     last_action_time = reaper.time_precise(),
-    prev_proj_change_count = reaper.GetProjectStateChangeCount(0),
+    prev_proj_change_count = 0,
     last_time = reaper.time_precise(),
     collapsed = true,
     last_save_time = reaper.time_precise(),
-    cache = {last_timer_value = -1, last_format_mode = -1, formatted_string = "00:00:00"},
-    display = {update_interval = CONFIG.DISPLAY_UPDATE_INTERVAL, last_update = 0},
+    cache = {
+        last_timer_value = -1,
+        last_format_mode = -1,
+        formatted_string = "00:00:00"
+    },
     activity = {
-        last_mouse_x = 0, 
-        last_mouse_y = 0, 
-        last_cursor_pos = 0, 
-        last_midi_hash = "",
-        last_check_time = 0, 
+        last_mouse_x = 0,
+        last_mouse_y = 0,
+        last_cursor_pos = 0,
+        last_check_time = 0,
         check_interval = CONFIG.ACTIVITY_CHECK_INTERVAL
     },
     transport_mode_active = CONFIG.DEFAULT_TRANSPORT_MODE_ACTIVE,
     transport_timer = 0,
-    transport_last_time = reaper.time_precise(),
-    settings_loaded = false,
     window_pos_x = 100,
     window_pos_y = 100,
-    font_size = CONFIG.FONT_SIZE,
+    font_size = CONFIG.FONT_SIZE
 }
 
 local settings_dirty = false
 local hover_times = {}
 local font_update_pending = false
+local window_position_pending = true
+local current_project
 
--- Create font once; only recreate when user finishes editing font size
 local font = ImGui.CreateFont(CONFIG.FONT_FAMILY, settings.font_size)
+local applied_font_size = settings.font_size
 ImGui.Attach(ctx, font)
 
--- Utility functions
-local function load_setting(key, default, convert_func)
-    local exists, value = reaper.GetProjExtState(CONFIG.PROJECT_ID, CONFIG.SECTION_NAME, key)
-    if exists and value and value ~= "" then
-        local success, result = pcall(function() return convert_func and convert_func(value) or value end)
-        return success and result or default
+local function clamp(value, minimum, maximum)
+    return math.max(minimum, math.min(value, maximum))
+end
+
+local function finite_number(value, default)
+    local number = tonumber(value)
+    if not number
+        or number ~= number
+        or number == math.huge
+        or number == -math.huge
+    then
+        return default
+    end
+    return number
+end
+
+local function load_setting(project, key, default, convert_func)
+    local exists, value =
+        reaper.GetProjExtState(project, CONFIG.SECTION_NAME, key)
+
+    if not exists or exists <= 0 or value == nil or value == "" then
+        return default
+    end
+
+    local success, result = pcall(function()
+        if convert_func then
+            return convert_func(value)
+        end
+        return value
+    end)
+
+    if success and result ~= nil then
+        return result
     end
     return default
 end
 
-local function save_setting(key, value)
-    if value ~= nil then
-        reaper.SetProjExtState(CONFIG.PROJECT_ID, CONFIG.SECTION_NAME, key, tostring(value))
+local function save_setting(project, key, value)
+    if project and value ~= nil then
+        reaper.SetProjExtState(
+            project,
+            CONFIG.SECTION_NAME,
+            key,
+            tostring(value)
+        )
     end
 end
 
-local function time_string(timer_value)
-    local total = math.floor(timer_value ~= nil and timer_value or settings.timer)
-    if timer_value == nil and 
-       settings.cache.last_timer_value == total and 
-       settings.cache.last_format_mode == settings.format_mode then
-        return settings.cache.formatted_string
-    end
-    
+local function format_time(timer_value)
+    local total = math.max(0, math.floor(finite_number(timer_value, 0)))
     local seconds = total % 60
     local total_minutes = math.floor(total / 60)
     local minutes = total_minutes % 60
@@ -110,137 +150,324 @@ local function time_string(timer_value)
     local total_days = math.floor(total_hours / 24)
     local days = total_days % 7
     local weeks = math.floor(total_days / 7)
-    
-    local result
+
     if settings.format_mode == 1 then
-        result = string.format("%dd %02d:%02d:%02d", total_days, hours, minutes, seconds)
+        return string.format(
+            "%dd %02d:%02d:%02d",
+            total_days,
+            hours,
+            minutes,
+            seconds
+        )
     elseif settings.format_mode == 2 then
-        hours = hours + total_days * 24
-        result = string.format("%02d:%02d:%02d", hours, minutes, seconds)
-    else
-        result = string.format("%dw %dd %02d:%02d:%02d", weeks, days, hours, minutes, seconds)
+        return string.format(
+            "%02d:%02d:%02d",
+            total_hours,
+            minutes,
+            seconds
+        )
     end
-    
-    if timer_value == nil then
-        settings.cache.last_timer_value = total
+
+    return string.format(
+        "%dw %dd %02d:%02d:%02d",
+        weeks,
+        days,
+        hours,
+        minutes,
+        seconds
+    )
+end
+
+local function refresh_timer_cache(force)
+    local floored_timer = math.max(0, math.floor(settings.timer))
+    if force
+        or floored_timer ~= settings.cache.last_timer_value
+        or settings.format_mode ~= settings.cache.last_format_mode
+    then
+        settings.cache.formatted_string = format_time(settings.timer)
+        settings.cache.last_timer_value = floored_timer
         settings.cache.last_format_mode = settings.format_mode
-        settings.cache.formatted_string = result
     end
-    
-    return result
 end
 
 local function apply_font_update()
-    if font_update_pending then
-        local success, err = pcall(function()
-            ImGui.Detach(ctx, font)
-            font = ImGui.CreateFont(CONFIG.FONT_FAMILY, settings.font_size)
-            ImGui.Attach(ctx, font)
-        end)
-        if not success then
-            reaper.ShowConsoleMsg("Error updating font: " .. tostring(err) .. "\n")
-        end
-        font_update_pending = false
+    if not font_update_pending then
+        return
+    end
+
+    font_update_pending = false
+    if settings.font_size == applied_font_size then
+        return
+    end
+
+    local success, err = pcall(function()
+        local replacement =
+            ImGui.CreateFont(CONFIG.FONT_FAMILY, settings.font_size)
+        ImGui.Attach(ctx, replacement)
+        ImGui.Detach(ctx, font)
+        font = replacement
+        applied_font_size = settings.font_size
+    end)
+
+    if not success then
+        settings.font_size = applied_font_size
+        settings_dirty = true
+        reaper.ShowConsoleMsg(
+            "Project Timer: error updating font: "
+                .. tostring(err)
+                .. "\n"
+        )
     end
 end
 
-local function restore_settings()
-    if settings.settings_loaded then return end
-    
-    settings.timer = load_setting("timer", 0, tonumber)
-    settings.format_mode = math.min(math.max(load_setting("format_mode", CONFIG.DEFAULT_FORMAT_MODE, tonumber), 1), 3)
-    settings.afk_threshold = math.min(math.max(load_setting("afk_threshold", CONFIG.DEFAULT_AFK_THRESHOLD, tonumber), 1), CONFIG.MAX_AFK_THRESHOLD)
-    settings.afk_enabled = load_setting("afk_enabled", 1, tonumber) == 1
-    settings.initial_paused = load_setting("initial_state", CONFIG.DEFAULT_INITIAL_PAUSED and 1 or 0, tonumber) == 1
-    settings.paused = settings.initial_paused
-    settings.transport_timer = load_setting("transport_timer", 0, tonumber)
-    settings.transport_mode_active = load_setting("transport_mode_active", CONFIG.DEFAULT_TRANSPORT_MODE_ACTIVE and 1 or 0, tonumber) == 1
-    settings.window_pos_x = load_setting("window_pos_x", 100, tonumber)
-    settings.window_pos_y = load_setting("window_pos_y", 100, tonumber)
-    settings.font_size = load_setting("font_size", CONFIG.FONT_SIZE, tonumber)
-    
-    settings.cache.formatted_string = time_string()
-    settings.cache.last_timer_value = math.floor(settings.timer)
-    settings.settings_loaded = true
-    
-    -- Apply loaded font size immediately
-    font_update_pending = true
-end
+local function restore_settings(project, current_time)
+    settings.timer = math.max(
+        0,
+        load_setting(project, "timer", 0, function(value)
+            return finite_number(value, 0)
+        end)
+    )
 
-local function store_settings()
-    save_setting("timer", math.floor(settings.timer))
-    save_setting("format_mode", settings.format_mode)
-    save_setting("afk_threshold", settings.afk_threshold)
-    save_setting("afk_enabled", settings.afk_enabled and 1 or 0)
-    save_setting("initial_state", settings.initial_paused and 1 or 0)
-    save_setting("transport_timer", math.floor(settings.transport_timer))
-    save_setting("transport_mode_active", settings.transport_mode_active and 1 or 0)
-    save_setting("window_pos_x", settings.window_pos_x)
-    save_setting("window_pos_y", settings.window_pos_y)
-    save_setting("font_size", settings.font_size)
+    settings.format_mode = clamp(
+        math.floor(
+            load_setting(
+                project,
+                "format_mode",
+                CONFIG.DEFAULT_FORMAT_MODE,
+                function(value)
+                    return finite_number(value, CONFIG.DEFAULT_FORMAT_MODE)
+                end
+            )
+        ),
+        1,
+        3
+    )
+
+    settings.afk_threshold = clamp(
+        math.floor(
+            load_setting(
+                project,
+                "afk_threshold",
+                CONFIG.DEFAULT_AFK_THRESHOLD,
+                function(value)
+                    return finite_number(value, CONFIG.DEFAULT_AFK_THRESHOLD)
+                end
+            )
+        ),
+        1,
+        CONFIG.MAX_AFK_THRESHOLD
+    )
+
+    settings.afk_enabled =
+        load_setting(project, "afk_enabled", 1, tonumber) == 1
+
+    settings.initial_paused =
+        load_setting(
+            project,
+            "initial_state",
+            CONFIG.DEFAULT_INITIAL_PAUSED and 1 or 0,
+            tonumber
+        ) == 1
+
+    settings.paused = settings.initial_paused
+
+    settings.transport_timer = math.max(
+        0,
+        load_setting(project, "transport_timer", 0, function(value)
+            return finite_number(value, 0)
+        end)
+    )
+
+    settings.transport_mode_active =
+        load_setting(
+            project,
+            "transport_mode_active",
+            CONFIG.DEFAULT_TRANSPORT_MODE_ACTIVE and 1 or 0,
+            tonumber
+        ) == 1
+
+    settings.window_pos_x =
+        load_setting(project, "window_pos_x", 100, function(value)
+            return finite_number(value, 100)
+        end)
+
+    settings.window_pos_y =
+        load_setting(project, "window_pos_y", 100, function(value)
+            return finite_number(value, 100)
+        end)
+
+    settings.font_size = clamp(
+        math.floor(
+            load_setting(
+                project,
+                "font_size",
+                CONFIG.FONT_SIZE,
+                function(value)
+                    return finite_number(value, CONFIG.FONT_SIZE)
+                end
+            )
+        ),
+        CONFIG.MIN_FONT_SIZE,
+        CONFIG.MAX_FONT_SIZE
+    )
+
+    settings.time_offset = {weeks = 0, days = 0, hours = 0, minutes = 0}
+    settings.last_action_time = current_time
+    settings.last_time = current_time
+    settings.last_save_time = current_time
+    settings.prev_proj_change_count =
+        reaper.GetProjectStateChangeCount(project)
+
+    local mouse_x, mouse_y = reaper.GetMousePosition()
+    settings.activity.last_mouse_x = mouse_x
+    settings.activity.last_mouse_y = mouse_y
+    settings.activity.last_cursor_pos = reaper.GetCursorPosition()
+    settings.activity.last_check_time = current_time
+
+    refresh_timer_cache(true)
+    font_update_pending = settings.font_size ~= applied_font_size
+    window_position_pending = true
     settings_dirty = false
 end
 
-local function apply_offset()
-    local offset_seconds = settings.time_offset.weeks * 7 * 86400 +
-                          settings.time_offset.days * 86400 +
-                          settings.time_offset.hours * 3600 +
-                          settings.time_offset.minutes * 60
-    
-    -- Prevent negative total time
-    if offset_seconds < -settings.timer then
-        offset_seconds = -settings.timer
+local function store_settings(project)
+    if not project then
+        return false
     end
-    
-    settings.timer = math.max(0, settings.timer + offset_seconds)
+
+    save_setting(project, "timer", string.format("%.3f", settings.timer))
+    save_setting(project, "format_mode", settings.format_mode)
+    save_setting(project, "afk_threshold", settings.afk_threshold)
+    save_setting(project, "afk_enabled", settings.afk_enabled and 1 or 0)
+    save_setting(
+        project,
+        "initial_state",
+        settings.initial_paused and 1 or 0
+    )
+    save_setting(
+        project,
+        "transport_timer",
+        string.format("%.3f", settings.transport_timer)
+    )
+    save_setting(
+        project,
+        "transport_mode_active",
+        settings.transport_mode_active and 1 or 0
+    )
+    save_setting(
+        project,
+        "window_pos_x",
+        string.format("%.1f", settings.window_pos_x)
+    )
+    save_setting(
+        project,
+        "window_pos_y",
+        string.format("%.1f", settings.window_pos_y)
+    )
+    save_setting(project, "font_size", settings.font_size)
+
+    settings_dirty = false
+    return true
+end
+
+local function get_active_project()
+    return reaper.EnumProjects(-1, "")
+end
+
+local function project_is_open(project)
+    if not project then
+        return false
+    end
+
+    for index = 0, 999 do
+        local candidate = reaper.EnumProjects(index, "")
+        if not candidate then
+            return false
+        end
+        if candidate == project then
+            return true
+        end
+    end
+
+    return false
+end
+
+local function switch_project(project, current_time)
+    if project == current_project then
+        return
+    end
+
+    if current_project and project_is_open(current_project) then
+        store_settings(current_project)
+    end
+
+    current_project = project
+    if current_project then
+        restore_settings(current_project, current_time)
+    end
+end
+
+local function apply_offset()
+    local offset_seconds =
+        settings.time_offset.weeks * 7 * 86400
+        + settings.time_offset.days * 86400
+        + settings.time_offset.hours * 3600
+        + settings.time_offset.minutes * 60
+
+    if settings.transport_mode_active then
+        settings.transport_timer =
+            math.max(0, settings.transport_timer + offset_seconds)
+    else
+        settings.timer = math.max(0, settings.timer + offset_seconds)
+        settings.last_action_time = reaper.time_precise()
+        refresh_timer_cache(true)
+    end
+
     settings.time_offset = {weeks = 0, days = 0, hours = 0, minutes = 0}
-    settings.cache.formatted_string = time_string()
-    settings.cache.last_timer_value = math.floor(settings.timer)
     settings_dirty = true
 end
 
 local function check_user_activity(current_time, play_state)
-    if current_time - settings.activity.last_check_time < settings.activity.check_interval then 
-        return false 
+    if current_time - settings.activity.last_check_time
+        < settings.activity.check_interval
+    then
+        return false
     end
-    
-    local x, y = reaper.GetMousePosition()
+
+    local mouse_x, mouse_y = reaper.GetMousePosition()
     local cursor_pos = reaper.GetCursorPosition()
-    
-    local activity_detected = x ~= settings.activity.last_mouse_x or 
-                            y ~= settings.activity.last_mouse_y or 
-                            cursor_pos ~= settings.activity.last_cursor_pos or
-                            play_state ~= 0
-    
-    -- Only check MIDI if no other activity detected (expensive call)
-    if not activity_detected then
-        local midi_editor = reaper.MIDIEditor_GetActive()
-        if midi_editor then
-            local take = reaper.MIDIEditor_GetTake(midi_editor)
-            if take then
-                local hash = reaper.MIDI_GetTrackHash(take)
-                activity_detected = hash ~= settings.activity.last_midi_hash
-                settings.activity.last_midi_hash = hash
-            end
-        end
-    end
-    
-    settings.activity.last_mouse_x, settings.activity.last_mouse_y = x, y
+    local transport_running = (play_state & 1) ~= 0
+
+    local activity_detected =
+        mouse_x ~= settings.activity.last_mouse_x
+        or mouse_y ~= settings.activity.last_mouse_y
+        or cursor_pos ~= settings.activity.last_cursor_pos
+        or transport_running
+
+    settings.activity.last_mouse_x = mouse_x
+    settings.activity.last_mouse_y = mouse_y
     settings.activity.last_cursor_pos = cursor_pos
     settings.activity.last_check_time = current_time
-    
+
     return activity_detected
 end
 
 local function cleanup()
-    store_settings()
+    local success, is_open = pcall(project_is_open, current_project)
+    if success and is_open then
+        pcall(store_settings, current_project)
+    end
 end
 
 local function handle_delayed_tooltip(key, text, delay)
     local current_time = reaper.time_precise()
     if ImGui.IsItemHovered(ctx) then
-        if not hover_times[key] then hover_times[key] = current_time end
-        if current_time - hover_times[key] >= (delay or CONFIG.DEFAULT_TOOLTIP_DELAY) then
+        if not hover_times[key] then
+            hover_times[key] = current_time
+        end
+        if current_time - hover_times[key]
+            >= (delay or CONFIG.DEFAULT_TOOLTIP_DELAY)
+        then
             ImGui.BeginTooltip(ctx)
             ImGui.Text(ctx, text)
             ImGui.EndTooltip(ctx)
@@ -250,289 +477,434 @@ local function handle_delayed_tooltip(key, text, delay)
     end
 end
 
-local function draw_settings_popup(ctx)
-    if ImGui.BeginPopup(ctx, 'Settings') then
-        ImGui.PushFont(ctx, font)
+local function draw_settings_popup()
+    if not ImGui.BeginPopup(ctx, "Settings") then
+        return
+    end
 
-        ImGui.Text(ctx, 'Time Format:')
-        handle_delayed_tooltip('time_format_tooltip', 'Choose how time is displayed')
+    ImGui.PushFont(ctx, font)
+
+    ImGui.Text(ctx, "Time Format:")
+    handle_delayed_tooltip(
+        "time_format_tooltip",
+        "Choose how time is displayed"
+    )
+    ImGui.Spacing(ctx)
+
+    local changed
+    changed, settings.format_mode =
+        ImGui.RadioButtonEx(ctx, "Hours", settings.format_mode, 2)
+    if changed then
+        settings_dirty = true
+        refresh_timer_cache(true)
+    end
+
+    ImGui.SameLine(ctx)
+    changed, settings.format_mode =
+        ImGui.RadioButtonEx(ctx, "Days", settings.format_mode, 1)
+    if changed then
+        settings_dirty = true
+        refresh_timer_cache(true)
+    end
+
+    ImGui.SameLine(ctx)
+    changed, settings.format_mode =
+        ImGui.RadioButtonEx(ctx, "Weeks", settings.format_mode, 3)
+    if changed then
+        settings_dirty = true
+        refresh_timer_cache(true)
+    end
+
+    ImGui.Spacing(ctx)
+    ImGui.Separator(ctx)
+    ImGui.Spacing(ctx)
+
+    ImGui.Text(ctx, "Initial State:")
+    ImGui.Spacing(ctx)
+
+    local initial_state = settings.initial_paused and 1 or 0
+    local start_paused_clicked
+    start_paused_clicked, initial_state =
+        ImGui.RadioButtonEx(ctx, "Start Paused", initial_state, 1)
+    if start_paused_clicked then
+        settings.initial_paused = true
+        settings_dirty = true
+    end
+
+    ImGui.SameLine(ctx)
+    local start_running_clicked
+    start_running_clicked, initial_state =
+        ImGui.RadioButtonEx(ctx, "Start Running", initial_state, 0)
+    if start_running_clicked then
+        settings.initial_paused = false
+        settings_dirty = true
+    end
+
+    ImGui.Spacing(ctx)
+    ImGui.Separator(ctx)
+    ImGui.Spacing(ctx)
+
+    ImGui.Text(ctx, "AFK Detection:")
+    ImGui.SameLine(ctx)
+    changed, settings.afk_enabled =
+        ImGui.Checkbox(ctx, "##afk_enabled", settings.afk_enabled)
+    if changed then
+        settings_dirty = true
+        settings.last_action_time = reaper.time_precise()
+    end
+    handle_delayed_tooltip(
+        "afk_enabled_tooltip",
+        "Enable or disable AFK detection"
+    )
+
+    if settings.afk_enabled then
         ImGui.Spacing(ctx)
-        
-        local changed
-        changed, settings.format_mode = ImGui.RadioButtonEx(ctx, 'Hours', settings.format_mode, 2)
-        if changed then settings_dirty = true end
-        ImGui.SameLine(ctx)
-        changed, settings.format_mode = ImGui.RadioButtonEx(ctx, 'Days', settings.format_mode, 1)
-        if changed then settings_dirty = true end
-        ImGui.SameLine(ctx)
-        changed, settings.format_mode = ImGui.RadioButtonEx(ctx, 'Weeks', settings.format_mode, 3)
-        if changed then settings_dirty = true end
-        
-        ImGui.Spacing(ctx)
-        ImGui.Separator(ctx)
-        ImGui.Spacing(ctx)
-        
-        ImGui.Text(ctx, 'Initial State:')
-        ImGui.Spacing(ctx)
-        
-        local initial_state = settings.initial_paused and 1 or 0
-        changed, initial_state = ImGui.RadioButtonEx(ctx, 'Start Paused', initial_state, 1)
-        ImGui.SameLine(ctx)
-        changed, initial_state = ImGui.RadioButtonEx(ctx, 'Start Running', initial_state, 0)
-        if changed then 
-            settings.initial_paused = (initial_state == 1)
+        ImGui.PushItemWidth(ctx, 80)
+        changed, settings.afk_threshold = ImGui.InputInt(
+            ctx,
+            "in minutes##afk",
+            settings.afk_threshold,
+            1,
+            5
+        )
+        if changed then
+            settings.afk_threshold = clamp(
+                settings.afk_threshold,
+                1,
+                CONFIG.MAX_AFK_THRESHOLD
+            )
+            settings.last_action_time = reaper.time_precise()
             settings_dirty = true
         end
-        
-        ImGui.Spacing(ctx)
-        ImGui.Separator(ctx)
-        ImGui.Spacing(ctx)
-        
-        ImGui.Text(ctx, 'AFK Detection:')
-        ImGui.SameLine(ctx)
-        changed, settings.afk_enabled = ImGui.Checkbox(ctx, '##afk_enabled', settings.afk_enabled)
-        if changed then settings_dirty = true end
-        handle_delayed_tooltip('afk_enabled_tooltip', 'Enable/disable AFK detection')
-        
-        if settings.afk_enabled then
-            ImGui.Spacing(ctx)
-            ImGui.PushItemWidth(ctx, 80)
-            changed, settings.afk_threshold = ImGui.InputInt(ctx, 'in minutes##afk', settings.afk_threshold, 1, 5)
-            if changed then
-                settings.afk_threshold = math.max(1, math.min(settings.afk_threshold, CONFIG.MAX_AFK_THRESHOLD))
-                settings_dirty = true
-            end
-            handle_delayed_tooltip('afk_input_tooltip', 'AFK threshold in minutes (Max: 60)')
-            ImGui.PopItemWidth(ctx)
-        end
-        
-        ImGui.Spacing(ctx)
-        ImGui.Separator(ctx)
-        ImGui.Spacing(ctx)
-        
-        ImGui.Text(ctx, 'Font Size:')
-        ImGui.PushItemWidth(ctx, 100)
-        local changed_font, new_font_size = ImGui.SliderInt(ctx, '##font_size', settings.font_size, CONFIG.MIN_FONT_SIZE, CONFIG.MAX_FONT_SIZE)
+        handle_delayed_tooltip(
+            "afk_input_tooltip",
+            "AFK threshold in minutes (maximum: 60)"
+        )
         ImGui.PopItemWidth(ctx)
-        if changed_font then
-            settings.font_size = new_font_size
-        end
-        -- Only rebuild font atlas when user releases the slider
-        if changed_font and ImGui.IsItemDeactivatedAfterEdit(ctx) then
-            font_update_pending = true
-        end
-        handle_delayed_tooltip('font_size_tooltip', 'Adjust font size (' .. CONFIG.MIN_FONT_SIZE .. '-' .. CONFIG.MAX_FONT_SIZE .. ')')
-        
-        ImGui.Spacing(ctx)
-        ImGui.Separator(ctx)
-        ImGui.Spacing(ctx)
-        
-        if ImGui.Button(ctx, 'Close') then
-            ImGui.CloseCurrentPopup(ctx)
-        end
-        
-        ImGui.PopFont(ctx)
-        ImGui.EndPopup(ctx)
     end
+
+    ImGui.Spacing(ctx)
+    ImGui.Separator(ctx)
+    ImGui.Spacing(ctx)
+
+    ImGui.Text(ctx, "Font Size:")
+    ImGui.PushItemWidth(ctx, 100)
+    local changed_font, new_font_size = ImGui.SliderInt(
+        ctx,
+        "##font_size",
+        settings.font_size,
+        CONFIG.MIN_FONT_SIZE,
+        CONFIG.MAX_FONT_SIZE
+    )
+    ImGui.PopItemWidth(ctx)
+
+    if changed_font then
+        settings.font_size = new_font_size
+        settings_dirty = true
+    end
+
+    if ImGui.IsItemDeactivatedAfterEdit(ctx) then
+        font_update_pending = true
+    end
+
+    handle_delayed_tooltip(
+        "font_size_tooltip",
+        "Adjust font size ("
+            .. CONFIG.MIN_FONT_SIZE
+            .. "-"
+            .. CONFIG.MAX_FONT_SIZE
+            .. ")"
+    )
+
+    ImGui.Spacing(ctx)
+    ImGui.Separator(ctx)
+    ImGui.Spacing(ctx)
+
+    if ImGui.Button(ctx, "Close") then
+        ImGui.CloseCurrentPopup(ctx)
+    end
+
+    ImGui.PopFont(ctx)
+    ImGui.EndPopup(ctx)
 end
 
-local function draw_time_offset_popup(ctx)
-    if ImGui.BeginPopup(ctx, 'Time Offset') then
-        ImGui.PushFont(ctx, font)
+local function draw_time_offset_popup()
+    if not ImGui.BeginPopup(ctx, "Time Offset") then
+        return
+    end
 
-        ImGui.Text(ctx, 'Add/Subtract time offset:')
-        local input_width = 80
-        
-        local function offset_input(label, value)
-            ImGui.PushItemWidth(ctx, input_width)
-            local changed, val = ImGui.InputInt(ctx, label, value)
-            ImGui.PopItemWidth(ctx)
-            if ImGui.IsItemActive(ctx) and ImGui.IsKeyPressed(ctx, ImGui.Key_Enter) then
-                apply_offset()
-                ImGui.CloseCurrentPopup(ctx)
-            end
-            return changed, val
-        end
-        
-        local changed
-        changed, settings.time_offset.weeks = offset_input('Weeks', settings.time_offset.weeks)
-        changed, settings.time_offset.days = offset_input('Days', settings.time_offset.days)
-        changed, settings.time_offset.hours = offset_input('Hours', settings.time_offset.hours)
-        changed, settings.time_offset.minutes = offset_input('Minutes', settings.time_offset.minutes)
-        
-        ImGui.Spacing(ctx)
-        if ImGui.Button(ctx, 'Apply') then
+    ImGui.PushFont(ctx, font)
+
+    local target_name =
+        settings.transport_mode_active and "transport timer" or "project timer"
+    ImGui.Text(ctx, "Adjust " .. target_name .. ":")
+
+    local input_width = 80
+
+    local function offset_input(label, value)
+        ImGui.PushItemWidth(ctx, input_width)
+        local changed, new_value = ImGui.InputInt(ctx, label, value)
+        ImGui.PopItemWidth(ctx)
+
+        if ImGui.IsItemActive(ctx)
+            and ImGui.IsKeyPressed(ctx, ImGui.Key_Enter)
+        then
             apply_offset()
             ImGui.CloseCurrentPopup(ctx)
         end
-        ImGui.SameLine(ctx)
-        if ImGui.Button(ctx, 'Cancel') then
-            settings.time_offset = {weeks = 0, days = 0, hours = 0, minutes = 0}
-            ImGui.CloseCurrentPopup(ctx)
-        end
 
-        ImGui.PopFont(ctx)
-        ImGui.EndPopup(ctx)
+        return changed, new_value
     end
+
+    local changed
+    changed, settings.time_offset.weeks =
+        offset_input("Weeks", settings.time_offset.weeks)
+    changed, settings.time_offset.days =
+        offset_input("Days", settings.time_offset.days)
+    changed, settings.time_offset.hours =
+        offset_input("Hours", settings.time_offset.hours)
+    changed, settings.time_offset.minutes =
+        offset_input("Minutes", settings.time_offset.minutes)
+
+    ImGui.Spacing(ctx)
+    if ImGui.Button(ctx, "Apply") then
+        apply_offset()
+        ImGui.CloseCurrentPopup(ctx)
+    end
+
+    ImGui.SameLine(ctx)
+    if ImGui.Button(ctx, "Cancel") then
+        settings.time_offset = {
+            weeks = 0,
+            days = 0,
+            hours = 0,
+            minutes = 0
+        }
+        ImGui.CloseCurrentPopup(ctx)
+    end
+
+    ImGui.PopFont(ctx)
+    ImGui.EndPopup(ctx)
 end
 
-local function draw_main_window(ctx, current_time)
-    ImGui.SetNextWindowPos(ctx, settings.window_pos_x, settings.window_pos_y, ImGui.Cond_Once)
-    
-    local visible, open = ImGui.Begin(ctx, 'Timer', true, WindowFlags)
-    
+local function draw_main_window(current_time)
+    if window_position_pending then
+        ImGui.SetNextWindowPos(
+            ctx,
+            settings.window_pos_x,
+            settings.window_pos_y,
+            ImGui.Cond_Always
+        )
+    end
+
+    local visible, open = ImGui.Begin(ctx, "Timer", true, WindowFlags)
+    window_position_pending = false
+
     if visible then
         ImGui.PushFont(ctx, font)
 
         local window_pos_x, window_pos_y = ImGui.GetWindowPos(ctx)
-        settings.window_pos_x = window_pos_x
-        settings.window_pos_y = window_pos_y
-        
-        local window_width = ImGui.GetWindowWidth(ctx)
-        
-        ImGui.AlignTextToFramePadding(ctx)
-        local display_string
-        
-        if settings.transport_mode_active then
-            display_string = time_string(settings.transport_timer)
-            ImGui.Text(ctx, display_string .. " [T]")
-        else
-            display_string = settings.cache.formatted_string
-            if (current_time - settings.display.last_update) >= settings.display.update_interval then
-                display_string = time_string()
-                settings.display.last_update = current_time
-            end
-            ImGui.Text(ctx, display_string)
+        if math.abs(window_pos_x - settings.window_pos_x) > 0.5
+            or math.abs(window_pos_y - settings.window_pos_y) > 0.5
+        then
+            settings.window_pos_x = window_pos_x
+            settings.window_pos_y = window_pos_y
+            settings_dirty = true
         end
-        
-        -- Only close on Escape if this window is actually focused
-        if ImGui.IsWindowFocused(ctx) and ImGui.IsKeyPressed(ctx, ImGui.Key_Escape) then
+
+        ImGui.AlignTextToFramePadding(ctx)
+        refresh_timer_cache(false)
+
+        local timer_display = settings.transport_mode_active
+                and (format_time(settings.transport_timer) .. " [T]")
+            or settings.cache.formatted_string
+        ImGui.Text(ctx, timer_display)
+
+        if ImGui.IsWindowFocused(ctx)
+            and ImGui.IsKeyPressed(ctx, ImGui.Key_Escape)
+        then
             open = false
         end
-                
-        handle_delayed_tooltip('timer_display_tooltip', settings.transport_mode_active and 'Transport timer' or 'Current project timer')
-        
+
+        handle_delayed_tooltip(
+            "timer_display_tooltip",
+            settings.transport_mode_active
+                and "Time accumulated while REAPER is playing or recording"
+                or "Current project work timer"
+        )
+
         ImGui.SameLine(ctx)
         if ImGui.Button(ctx, settings.collapsed and "+" or "-") then
             settings.collapsed = not settings.collapsed
         end
-        
+
         if not settings.collapsed then
             ImGui.Spacing(ctx)
-            local button_width = window_width - 20
-            local content_width = ImGui.GetContentRegionAvail(ctx)
-            local padding = (content_width - button_width) / 2
-            
-            ImGui.Indent(ctx, padding)
-            
-            if ImGui.Button(ctx, settings.paused and "Start" or "Pause", button_width, 0) then
-                settings.paused = not settings.paused
-                settings.last_action_time = current_time
+
+            -- Match the buttons to the compact timer-and-toggle row. The
+            -- Transport label supplies a small minimum if it is wider.
+            local frame_padding_x =
+                ImGui.GetStyleVar(ctx, ImGui.StyleVar_FramePadding)
+            local item_spacing_x =
+                ImGui.GetStyleVar(ctx, ImGui.StyleVar_ItemSpacing)
+            local compact_row_width =
+                ImGui.CalcTextSize(ctx, timer_display)
+                + item_spacing_x
+                + ImGui.CalcTextSize(ctx, "-")
+                + frame_padding_x * 2
+            local transport_width =
+                ImGui.CalcTextSize(ctx, "Transport") + frame_padding_x * 2
+            local button_width =
+                math.ceil(math.max(compact_row_width, transport_width))
+
+            if not settings.transport_mode_active then
+                if ImGui.Button(
+                    ctx,
+                    settings.paused and "Start" or "Pause",
+                    button_width,
+                    0
+                ) then
+                    settings.paused = not settings.paused
+                    settings.last_action_time = current_time
+                    settings_dirty = true
+                end
+            end
+
+            if ImGui.Button(ctx, "Transport", button_width, 0) then
+                settings.transport_mode_active =
+                    not settings.transport_mode_active
                 settings_dirty = true
             end
-            
-            if ImGui.Button(ctx, settings.transport_mode_active and "Tr Off" or "Trans On", button_width, 0) then
-                settings.transport_mode_active = not settings.transport_mode_active
+            handle_delayed_tooltip(
+                "transport_toggle_tooltip",
+                "Show and run the timer only while REAPER plays or records"
+            )
+
+            if ImGui.Button(ctx, "Offset", button_width, 0) then
+                ImGui.OpenPopup(ctx, "Time Offset")
+            end
+
+            if ImGui.Button(ctx, "Settings", button_width, 0) then
+                ImGui.OpenPopup(ctx, "Settings")
+            end
+
+            if ImGui.Button(ctx, "Reset", button_width, 0) then
                 if settings.transport_mode_active then
-                    settings.transport_last_time = current_time
+                    settings.transport_timer = 0
+                else
+                    settings.timer = 0
+                    settings.last_action_time = current_time
+                    refresh_timer_cache(true)
                 end
                 settings_dirty = true
             end
-            handle_delayed_tooltip('transport_toggle_tooltip', 'Toggle transport mode on/off')
-            
-            if ImGui.Button(ctx, '- +', button_width, 0) then 
-                ImGui.OpenPopup(ctx, 'Time Offset') 
-            end
-            if ImGui.Button(ctx, 'Settings', button_width, 0) then 
-                ImGui.OpenPopup(ctx, 'Settings') 
-            end
-            if ImGui.Button(ctx, 'Reset', button_width, 0) then
-                settings.timer = 0
-                settings.transport_timer = 0
-                settings.last_action_time = current_time
-                settings.cache.formatted_string = time_string()
-                settings.cache.last_timer_value = 0
-                settings_dirty = true
-            end
-            
-            ImGui.Unindent(ctx, padding)
+            handle_delayed_tooltip(
+                "reset_tooltip",
+                "Reset only the timer currently shown"
+            )
+
         end
-        
-        draw_settings_popup(ctx)
-        draw_time_offset_popup(ctx)
+
+        draw_settings_popup()
+        draw_time_offset_popup()
 
         ImGui.PopFont(ctx)
         ImGui.End(ctx)
     end
-    
-    return open
-end 
 
-local function advance_timers(dt, current_time, play_state)
-    if not settings.paused then
-        local is_user_active = check_user_activity(current_time, play_state)
-        
-        if is_user_active then
+    return open
+end
+
+local function advance_timers(
+    dt,
+    current_time,
+    play_state,
+    project_changed
+)
+    if project_changed then
+        settings.last_action_time = current_time
+    end
+
+    if not settings.paused and dt > 0 then
+        local user_active =
+            project_changed or check_user_activity(current_time, play_state)
+
+        if user_active then
             settings.last_action_time = current_time
         end
-        
-        local threshold_in_seconds = settings.afk_threshold * 60
-        local time_since_last_action = current_time - settings.last_action_time
-        local is_afk = settings.afk_enabled and (time_since_last_action >= threshold_in_seconds)
-        
-        if not is_afk then
-            settings.timer = settings.timer + dt
+
+        local active_dt = dt
+        if settings.afk_enabled and not user_active then
+            local threshold_seconds = settings.afk_threshold * 60
+            local active_until =
+                settings.last_action_time + threshold_seconds
+            local frame_start = current_time - dt
+            active_dt = clamp(active_until - frame_start, 0, dt)
+        end
+
+        if active_dt > 0 then
+            settings.timer = settings.timer + active_dt
+            settings_dirty = true
         end
     end
-    
-    if settings.transport_mode_active and play_state == 1 then
+
+    local transport_running = (play_state & 1) ~= 0
+    if settings.transport_mode_active and transport_running and dt > 0 then
         settings.transport_timer = settings.transport_timer + dt
-    end
-    
-    local floored = math.floor(settings.timer)
-    if floored ~= settings.cache.last_timer_value then
-        settings.cache.formatted_string = time_string()
-        settings.cache.last_timer_value = floored
         settings_dirty = true
     end
+
+    refresh_timer_cache(false)
 end
 
 local function main()
     local current_time = reaper.time_precise()
-    local play_state = reaper.GetPlayState()
-    local proj_change_count = reaper.GetProjectStateChangeCount(CONFIG.PROJECT_ID)
-    
-    if not settings.settings_loaded then
-        restore_settings()
+    local active_project = get_active_project()
+    switch_project(active_project, current_time)
+
+    if not current_project then
+        reaper.defer(main)
+        return
     end
-    
-    -- Apply font update before rendering if needed
+
     apply_font_update()
-    
-    local dt = current_time - settings.last_time
-    
-    -- Project state changes count as user activity for AFK reset
-    if proj_change_count ~= settings.prev_proj_change_count then
-        settings.last_action_time = current_time
-    end
-    
-    advance_timers(dt, current_time, play_state)
-    
-    settings.transport_last_time = current_time
+
+    local play_state = reaper.GetPlayStateEx(current_project)
+    local proj_change_count =
+        reaper.GetProjectStateChangeCount(current_project)
+    local project_changed =
+        proj_change_count ~= settings.prev_proj_change_count
+
+    local raw_dt = current_time - settings.last_time
+    local dt = clamp(raw_dt, 0, CONFIG.MAX_FRAME_DELTA)
     settings.last_time = current_time
+
+    advance_timers(dt, current_time, play_state, project_changed)
     settings.prev_proj_change_count = proj_change_count
 
-    local open = draw_main_window(ctx, current_time)
-    
-    -- Only write to project extstate when something changed
-    if settings_dirty and (current_time - settings.last_save_time >= CONFIG.AUTO_SAVE_INTERVAL) then
-        store_settings()
-        settings.last_save_time = current_time
+    local open = draw_main_window(current_time)
+
+    if settings_dirty
+        and current_time - settings.last_save_time
+            >= CONFIG.AUTO_SAVE_INTERVAL
+    then
+        if store_settings(current_project) then
+            settings.last_save_time = current_time
+
+            -- Ignore project-state changes caused by our own extstate writes.
+            settings.prev_proj_change_count =
+                reaper.GetProjectStateChangeCount(current_project)
+        end
     end
-    
+
     if open then
         reaper.defer(main)
     end
+end
+
+current_project = get_active_project()
+if current_project then
+    restore_settings(current_project, reaper.time_precise())
 end
 
 reaper.atexit(cleanup)
